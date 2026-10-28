@@ -1,0 +1,507 @@
+/* ---------------------------------------------------------------------------
+   CW Social Publisher — design tokens and base layer
+
+   Direction: taste-skill "accent-ladder" (seed 1725352371), re-hued onto the CW
+   brand palette. The style's *move* is preserved: the full hue appears only on
+   small marks (the one filled button, the data series, the active nav icon),
+   while its pale tints carry every area (active nav row, badges, tracks).
+
+   Colour is restricted to the CW brand tokens supplied by the client. Neutral
+   greys are derived from --dark-color / --light-color / --darkgrey-color so
+   that no off-brand hue (no violet, no indigo, no terracotta) enters the UI.
+--------------------------------------------------------------------------- */
+
+@import "tailwindcss";
+@import "./shell.css";
+@import "./patterns.css";
+
+:root {
+  /* --- Brand (the only palette allowed) --------------------------------- */
+  --primary-color: #e62f30;
+  --primary-dark-color: #dd4747;
+  --secondary-color: #0583d8;
+  --secondary-dark-color: #0575c1;
+  --dark-color: #000000;
+  --light-color: #ffffff;
+  --cream-color: #fff8eb;
+  --lightgrey-color: #d3d3d3;
+  --darkgrey-color: #777777;
+  --halfwhite-color: #f8f8f8;
+  --green-color: #45c998;
+  --transparentred-color: #fff0f0;
+  --button-primary: #e62f30;
+  --button-primary-hover: #d53031;
+
+  /* --- Surfaces --------------------------------------------------------- */
+  --ground: var(--halfwhite-color);
+  --surface: var(--light-color);
+  --raised: #fbfbfb;
+  --active: #efefef;
+
+  /* --- Lines (steps built from the brand greys) ------------------------- */
+  --border: #e6e6e6;
+  --rule: #f0f0f0;
+  --control: var(--lightgrey-color);
+
+  /* --- Ink -------------------------------------------------------------- */
+  --text: var(--dark-color);
+  /* Body greys are derived from --darkgrey-color. The token itself (#777) is
+     4.48:1 on white, a hair under the 4.5:1 floor, so the two text steps are
+     set from that same grey family one and two steps darker. */
+  --muted: #5c5c5c;
+  --faint: #6b6b6b;
+
+  /* --- Action ----------------------------------------------------------- */
+  /* Filled buttons use --button-primary-hover (#D53031) rather than
+     --button-primary (#E62F30). White on #E62F30 measures 4.36:1 and fails the
+     4.5:1 threshold for button text; white on #D53031 measures 4.89:1 and
+     passes. Both are CW brand tokens, so the button is still the brand red.
+     Hover darkens the same hue with a filter rather than inventing a seventh
+     red. */
+  --primary: var(--button-primary-hover);
+  --primary-hover-filter: brightness(0.92);
+
+  /* --- Accent ladder ---------------------------------------------------- */
+  --accent: var(--primary-color);
+  --accent-soft: var(--transparentred-color);
+  --accent-track: #ffdede;
+  --accent-ink: var(--primary-dark-color);
+
+  /* --- Status ----------------------------------------------------------- */
+  /* --green-color (#45c998) is 2.09:1 as text on white, far below the floor, so
+     it is kept for fills and dots while status text uses the same hue at 60%
+     lightness (#29795b: 5.28:1 on white, 4.97:1 on the ground). */
+  --positive: #29795b;
+  --negative: var(--primary);
+  --warning: #8a5a00;
+
+  --pill-positive-bg: #e6f7f0;
+  --pill-positive-ink: #14654a;
+  --pill-negative-bg: var(--transparentred-color);
+  --pill-negative-ink: #a81f20;
+  --pill-warning-bg: var(--cream-color);
+  --pill-warning-ink: var(--warning);
+  --pill-neutral-bg: #f0f0f0;
+  --pill-neutral-ink: #4a4a4a;
+  --pill-accent-bg: var(--transparentred-color);
+  --pill-accent-ink: #a81f20;
+  --pill-info-bg: #e9f4fc;
+  --pill-info-ink: var(--secondary-dark-color);
+
+  /* --- Data (charts) ---------------------------------------------------- */
+  --chart-1: var(--primary-color);
+  --chart-2: var(--secondary-color);
+  --chart-3: var(--darkgrey-color);
+  --grid: #ececec;
+  --chart-span: 0.06;
+
+  /* --- Geometry --------------------------------------------------------- */
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-chip: 4px;
+  --sidebar-width: 236px;
+  --gap: 24px;
+  --pad: 24px;
+  --nav-row: 34px;
+  --nav-pitch: 34px;
+  --control-height: 32px;
+  --row-height: 45px;
+
+  /* --- Type (DM Sans, dealt by the sheet) ------------------------------- */
+  --font: var(--font-dm-sans), "DM Sans", system-ui, -apple-system, sans-serif;
+  --fs-title: 26px;
+  --fs-section: 16px;
+  --fs-kpi: 24px;
+  --fs-body: 14px;
+  /* The app-screens rules put a floor of 11px on meta text, but the inspector
+     measures how much of the screen sits under 13px and this UI was at 55%.
+     Labels and data now read at 13px; 12px is reserved for sublines in table
+     cells and calendar chips, where the label above it carries the meaning. */
+  --fs-small: 13px;
+  --fs-meta: 12px;
+
+  /* --- Motion ----------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur: 180ms;
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+--------------------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* Focus is always visible and always uses the brand accent. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+::selection {
+  background: var(--accent-track);
+  color: var(--text);
+}
+
+/* Numbers must line up in every table, KPI and updating value. */
+.num,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------------------
+   Shared primitives
+--------------------------------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px var(--pad);
+  border-bottom: 1px solid var(--rule);
+}
+
+.panel-title {
+  font-size: var(--fs-section);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.panel-body {
+  padding: var(--pad);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.faint {
+  color: var(--faint);
+}
+
+.small {
+  font-size: var(--fs-small);
+}
+
+/* Buttons: one filled primary per screen; secondary is outlined; tertiary is
+   text-only. All share one height so rows never go ragged. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: transparent;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--light-color);
+}
+
+.btn-primary:hover:not(:disabled) {
+  filter: var(--primary-hover-filter);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  border-color: var(--control);
+  color: var(--text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--raised);
+  border-color: var(--darkgrey-color);
+}
+
+.btn-ghost {
+  color: var(--muted);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--active);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--surface);
+  border-color: var(--control);
+  color: var(--negative);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: var(--primary-color);
+}
+
+.btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-small);
+}
+
+/* Status pills: pale tint, dark text of the same hue. Never above a heading. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius-chip);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  flex: none;
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+
+.pill-neutral {
+  background: var(--pill-neutral-bg);
+  color: var(--pill-neutral-ink);
+}
+.pill-positive {
+  background: var(--pill-positive-bg);
+  color: var(--pill-positive-ink);
+}
+.pill-negative {
+  background: var(--pill-negative-bg);
+  color: var(--pill-negative-ink);
+}
+.pill-warning {
+  background: var(--pill-warning-bg);
+  color: var(--pill-warning-ink);
+}
+.pill-accent {
+  background: var(--pill-accent-bg);
+  color: var(--pill-accent-ink);
+}
+.pill-info {
+  background: var(--pill-info-bg);
+  color: var(--pill-info-ink);
+}
+
+/* Fields */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-label {
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+
+.field-hint {
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.field-error {
+  font-size: var(--fs-small);
+  color: var(--negative);
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  transition: border-color var(--dur-fast) var(--ease);
+}
+
+.input,
+.select {
+  height: 40px;
+  padding: 0 12px;
+}
+
+.textarea {
+  padding: 10px 12px;
+  min-height: 96px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+.input:hover,
+.select:hover,
+.textarea:hover {
+  border-color: var(--darkgrey-color);
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  /* taste-skill-ignore: shadow — this is a focus ring, required for keyboard
+     accessibility, not decoration on a resting element. */
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.input[aria-invalid="true"],
+.textarea[aria-invalid="true"] {
+  border-color: var(--negative);
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--faint);
+}
+
+/* Tables: rules and alignment, never zebra. Numbers right-aligned. */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th {
+  text-align: left;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--muted);
+  padding: 0 12px 10px;
+}
+
+.table th.num {
+  text-align: right;
+}
+
+.table td {
+  padding: 12px;
+  border-top: 1px solid var(--rule);
+  vertical-align: middle;
+}
+
+.table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table tbody tr:hover {
+  background: var(--raised);
+}
+
+/* Empty, loading and error states keep their frame. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 24px;
+  text-align: center;
+  border: 1px dashed var(--lightgrey-color);
+  border-radius: var(--radius-card);
+  color: var(--muted);
+}
+
+.skeleton {
+  background: var(--active);
+  border-radius: 4px;
+  display: block;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

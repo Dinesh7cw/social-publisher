@@ -1,0 +1,86 @@
+# Development infrastructure for CW Social Publisher.
+#
+# Ports are deliberately non-default: 5432, 55432, 56379 and 8080-8095 are in
+# use by other projects on this machine.
+#
+#   postgres -> 55440   redis -> 56390   s3 (RustFS) -> 9010 / console 9011
+#
+# Storage note: MinIO's images are no longer anonymously pullable from Docker
+# Hub or quay.io, so the dev S3-compatible server is RustFS, which speaks the
+# same S3 API. The application only ever talks S3, so production can use MinIO,
+# RustFS, AWS S3 or any compatible provider without a code change.
+
+name: cw-social-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cw-social-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cw
+      POSTGRES_PASSWORD: cw_dev_password
+      POSTGRES_DB: cw_social
+    ports:
+      - "55440:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cw -d cw_social"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+
+  redis:
+    image: redis:7-alpine
+    container_name: cw-social-redis
+    restart: unless-stopped
+    ports:
+      - "56390:6379"
+    volumes:
+      - redis-data:/data
+    # BullMQ needs persistence so scheduled jobs survive a restart — a hard
+    # requirement of the brief, not a nicety.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  s3:
+    image: rustfs/rustfs:latest
+    container_name: cw-social-s3
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: cw_minio
+      RUSTFS_SECRET_KEY: cw_minio_password
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - s3-data:/data
+    healthcheck:
+      test: ["CMD", "sh", "-c", "(echo > /dev/tcp/127.0.0.1/9000) 2>/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres-data:
+  redis-data:
+  s3-data:

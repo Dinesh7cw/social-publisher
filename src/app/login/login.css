@@ -1,0 +1,181 @@
+/* Login.
+
+   Two columns on one ground: an intro that says what the product is, and the
+   form. No card floating in a void, no illustration, no gradient.
+
+   Arithmetic at 1440: gutter 48 + intro 1fr + 64 gap + form 400 + 48 = full width.
+   The form column is fixed so the inputs stay a comfortable measure. */
+
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: 64px;
+  align-items: center;
+  padding: 48px;
+  max-width: 1240px;
+  margin: 0 auto;
+}
+
+/* --- Intro --------------------------------------------------------------- */
+
+.login-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-width: 52ch;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 40px;
+}
+
+.login-wordmark {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Two statements at two sizes: the product line is the h1 at app scale, and the
+   sentence under it carries the explanation. Deliberately not a landing-page
+   hero: this is the door to a tool, not a marketing page. */
+.login-headline {
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1.12;
+  margin-bottom: 14px;
+  max-width: 24ch;
+}
+
+.login-lede {
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--muted);
+  max-width: 46ch;
+  margin-bottom: 32px;
+}
+
+/* Facts as a definition list: label in ink, meaning in grey. Not icon cards. */
+.login-facts {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.login-facts > div {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.login-facts dt {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.login-facts dd {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* --- Form ---------------------------------------------------------------- */
+
+.login-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 28px;
+}
+
+.login-title {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.login-sub {
+  margin-top: 4px;
+  margin-bottom: 22px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-submit {
+  height: 40px;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.login-hint {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* --- Responsive ---------------------------------------------------------- */
+
+@media (max-width: 1024px) {
+  .login-page {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+    padding: 32px 24px;
+    align-items: start;
+    max-width: 480px;
+  }
+
+  /* On a phone the intro is a short orientation, not a hero: the form is the
+     reason the person is here, so the headline drops to app scale. */
+  .login-headline {
+    font-size: 22px;
+    letter-spacing: -0.02em;
+    margin-bottom: 10px;
+  }
+
+  .login-lede {
+    font-size: 14px;
+  }
+
+  .login-brand {
+    margin-bottom: 24px;
+  }
+
+  /* The intro's facts are the first thing to go when the screen is short. */
+  .login-facts {
+    display: none;
+  }
+
+  .login-lede {
+    margin-bottom: 0;
+  }
+
+  .login-panel {
+    margin-top: 8px;
+  }
+}
+
+@media (max-width: 480px) {
+  .login-page {
+    padding: 24px 16px;
+  }
+
+  .login-panel {
+    padding: 20px;
+  }
+}

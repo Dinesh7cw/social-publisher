@@ -1,0 +1,230 @@
+/* Calendar.
+
+   People are not the axis here (this is not a leave planner), so the grid is
+   days only. Day lines are faint 1px, outside-month days step down one tone, and
+   today is marked by a rule in the data hue rather than a filled cell. */
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.calendar-heading {
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 170px;
+  text-align: center;
+}
+
+.calendar-modes {
+  display: flex;
+  gap: 2px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 2px;
+}
+
+.calendar-modes .mode-option {
+  height: 26px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.calendar-cell {
+  min-height: 116px;
+  padding: 6px;
+  border-right: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.calendar-cell:nth-child(7n) {
+  border-right: 0;
+}
+
+.calendar-grid-week .calendar-cell {
+  min-height: 320px;
+}
+
+.calendar-cell[data-outside="true"] {
+  background: var(--ground);
+}
+
+.calendar-cell[data-outside="true"] .calendar-daynum {
+  color: var(--faint);
+}
+
+/* Today: a rule in the one data hue, not a filled cell. */
+.calendar-cell[data-today="true"] {
+  /* taste-skill-ignore: shadow — an inset 2px rule marking today, which is the
+     documented app-screen convention for a calendar; it casts nothing. */
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+.calendar-date {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 0 2px 2px;
+}
+
+.calendar-daynum {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.calendar-cell[data-today="true"] .calendar-daynum {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.calendar-today-label {
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.calendar-grid-skeleton {
+  min-height: 400px;
+}
+
+/* --- Chips --------------------------------------------------------------- */
+
+.calendar-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 6px;
+  border-radius: var(--radius-chip);
+  background: var(--raised);
+  border-left: 2px solid var(--lightgrey-color);
+  min-width: 0;
+  position: relative;
+}
+
+.calendar-chip[data-status="SCHEDULED"] {
+  border-left-color: var(--secondary-color);
+  background: var(--pill-info-bg);
+}
+
+.calendar-chip[data-status="PUBLISHED"] {
+  border-left-color: var(--positive);
+  background: var(--pill-positive-bg);
+}
+
+.calendar-chip[data-status="FAILED"],
+.calendar-chip[data-status="PARTIAL"] {
+  border-left-color: var(--primary-color);
+  background: var(--pill-negative-bg);
+}
+
+.calendar-chip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.calendar-chip-time {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.calendar-chip-head .pill {
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10px;
+}
+
+.calendar-chip-client {
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.calendar-chip-caption {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.calendar-chip-platforms {
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.calendar-chip-cancel {
+  align-self: flex-start;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  color: var(--negative);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.calendar-chip-cancel:hover {
+  color: var(--primary-hover);
+}
+
+/* --- Responsive ---------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .calendar-cell {
+    min-height: 92px;
+  }
+
+  .calendar-chip-caption {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .calendar-heading {
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  /* On a phone the month grid becomes a list of days with content. */
+  .calendar-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .calendar-cell {
+    min-height: 0;
+    border-right: 0;
+  }
+
+  /* Hide empty days so the list is readable rather than mostly blank. */
+  .calendar-cell:not(:has(.calendar-chip)) {
+    display: none;
+  }
+}

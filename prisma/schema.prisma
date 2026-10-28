@@ -1,0 +1,437 @@
+// CW Social Publisher — canonical schema.
+//
+// This file is the frozen contract between workstreams. See docs/DATABASE.md
+// for the reasoning behind each decision.
+//
+// Secrets (OAuth tokens) live only in SocialAccountSecret and are encrypted at
+// rest. No other model may hold a token.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+// Prisma 7: the connection URL lives in prisma.config.ts (for Migrate) and is
+// passed to PrismaClient through a driver adapter at runtime. It is no longer
+// allowed here.
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum ClientStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum Platform {
+  FACEBOOK
+  INSTAGRAM
+  LINKEDIN
+  X
+}
+
+enum AccountType {
+  PAGE
+  IG_PROFESSIONAL
+  MEMBER
+  ORGANIZATION
+  X_ACCOUNT
+}
+
+enum AccountStatus {
+  CONNECTED
+  EXPIRED
+  REVOKED
+  ERROR
+}
+
+enum PostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  PARTIAL
+  FAILED
+  CANCELLED
+}
+
+enum TargetStatus {
+  PENDING
+  QUEUED
+  PUBLISHING
+  PUBLISHED
+  FAILED_RETRYABLE
+  FAILED_PERMANENT
+  UNKNOWN
+  SKIPPED
+  CANCELLED
+}
+
+enum MediaKind {
+  IMAGE
+  VIDEO
+}
+
+enum JobState {
+  PENDING
+  DELAYED
+  ACTIVE
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AttemptOutcome {
+  IN_PROGRESS
+  SUCCESS
+  RETRYABLE_FAILURE
+  PERMANENT_FAILURE
+  UNKNOWN
+}
+
+enum AuditAction {
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  CLIENT_ARCHIVED
+  ACCOUNT_CONNECTED
+  ACCOUNT_RECONNECTED
+  ACCOUNT_DISCONNECTED
+  ACCOUNT_VERIFIED
+  POST_CREATED
+  POST_UPDATED
+  POST_SCHEDULED
+  POST_RESCHEDULED
+  POST_PUBLISHED
+  POST_CANCELLED
+  POST_DUPLICATED
+  POST_RETRY
+  MEDIA_UPLOADED
+  USER_CREATED
+  USER_UPDATED
+  USER_DEACTIVATED
+  ROLE_CHANGED
+  LOGIN_SUCCEEDED
+  LOGIN_FAILED
+  LOGOUT
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(MEMBER)
+  isActive     Boolean  @default(true)
+  timeZone     String   @default("Asia/Kolkata")
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  sessions          Session[]
+  clientsCreated    Client[]        @relation("ClientCreator")
+  accountsConnected SocialAccount[] @relation("AccountConnector")
+  posts             Post[]          @relation("PostAuthor")
+  mediaUploaded     MediaAsset[]    @relation("MediaUploader")
+  auditLogs         AuditLog[]      @relation("AuditActor")
+
+  @@index([isActive])
+}
+
+model Session {
+  id        String    @id // the raw id is never sent to the client; a signed token wraps it
+  userId    String
+  expiresAt DateTime  @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  userAgent String?
+  ipHash    String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// One-time OAuth state records. Bound to a session and consumed on first use.
+model OAuthState {
+  id           String   @id
+  userId       String
+  platform     Platform
+  codeVerifier String?
+  redirectTo   String?
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt    DateTime @db.Timestamptz(3)
+  consumedAt   DateTime? @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+// Holds the accounts discovered during an OAuth flow, before the team picks
+// which ones to attach to which client. Short-lived; encrypted like real
+// secrets because it carries tokens.
+model ConnectSession {
+  id         String   @id @default(cuid())
+  userId     String
+  platform   Platform
+  payloadCipher String
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt  DateTime @db.Timestamptz(3)
+  consumedAt DateTime? @db.Timestamptz(3)
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Clients and accounts
+// ---------------------------------------------------------------------------
+
+model Client {
+  id           String       @id @default(cuid())
+  name         String
+  slug         String       @unique
+  contactName  String?
+  contactEmail String?
+  notes        String?
+  status       ClientStatus @default(ACTIVE)
+  archivedAt   DateTime?    @db.Timestamptz(3)
+  createdById  String
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime     @updatedAt @db.Timestamptz(3)
+
+  createdBy User            @relation("ClientCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  accounts  SocialAccount[]
+  posts     Post[]
+  media     MediaAsset[]
+  auditLogs AuditLog[]
+
+  @@index([status])
+  @@index([name])
+}
+
+model SocialAccount {
+  id              String        @id @default(cuid())
+  clientId        String
+  platform        Platform
+  externalId      String
+  displayName     String
+  accountType     AccountType
+  status          AccountStatus @default(CONNECTED)
+  scopes          String[]
+  tokenExpiresAt  DateTime?     @db.Timestamptz(3)
+  lastVerifiedAt  DateTime?     @db.Timestamptz(3)
+  connectedById   String
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+
+  client      Client               @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  connectedBy User                 @relation("AccountConnector", fields: [connectedById], references: [id], onDelete: Restrict)
+  secret      SocialAccountSecret?
+  targets     PostTarget[]
+
+  // The same page must not be connected twice: that is how double posts happen.
+  @@unique([platform, externalId])
+  @@index([clientId])
+  @@index([status])
+  @@index([platform])
+}
+
+// Encrypted credentials. Deliberately has no relation to anything the UI reads.
+model SocialAccountSecret {
+  id                 String    @id @default(cuid())
+  socialAccountId    String    @unique
+  accessTokenCipher  String
+  refreshTokenCipher String?
+  tokenType          String?
+  keyId              String
+  rotatedAt          DateTime? @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
+
+  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------------------
+// Content
+// ---------------------------------------------------------------------------
+
+model Post {
+  id                String     @id @default(cuid())
+  clientId          String
+  authorId          String
+  baseCaption       String     @db.Text
+  status            PostStatus @default(DRAFT)
+  scheduledAt       DateTime?  @db.Timestamptz(3)
+  scheduledTimeZone String?
+  publishedAt       DateTime?  @db.Timestamptz(3)
+  duplicatedFromId  String?
+  createdAt         DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime   @updatedAt @db.Timestamptz(3)
+
+  client     Client   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  author     User     @relation("PostAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+  duplicatedFrom Post? @relation("PostDuplicate", fields: [duplicatedFromId], references: [id], onDelete: SetNull)
+  duplicates Post[]   @relation("PostDuplicate")
+  targets    PostTarget[]
+  media      PostMedia[]
+
+  @@index([clientId, status])
+  @@index([scheduledAt])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PostTarget {
+  id               String       @id @default(cuid())
+  postId           String
+  socialAccountId  String
+  caption          String       @db.Text
+  status           TargetStatus @default(PENDING)
+  attemptCount     Int          @default(0)
+  platformPostId   String?
+  platformPostUrl  String?
+  lastErrorCode    String?
+  lastErrorMessage String?      @db.Text
+  publishedAt      DateTime?    @db.Timestamptz(3)
+  createdAt        DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @db.Timestamptz(3)
+
+  post          Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Restrict)
+  attempts      PublishingAttempt[]
+  jobs          ScheduledJob[]
+
+  @@unique([postId, socialAccountId])
+  @@index([status])
+  @@index([socialAccountId])
+  @@index([publishedAt])
+}
+
+model MediaAsset {
+  id              String    @id @default(cuid())
+  clientId        String
+  uploadedById    String
+  kind            MediaKind
+  mimeType        String
+  byteSize        Int
+  width           Int?
+  height          Int?
+  durationSeconds Float?
+  storageKey      String
+  publicUrl       String?
+  contentHash     String
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+
+  client     Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  uploadedBy User        @relation("MediaUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  posts      PostMedia[]
+
+  @@index([clientId])
+  @@index([contentHash])
+}
+
+model PostMedia {
+  postId       String
+  mediaAssetId String
+  position     Int      @default(0)
+
+  post  Post       @relation(fields: [postId], references: [id], onDelete: Cascade)
+  media MediaAsset @relation(fields: [mediaAssetId], references: [id], onDelete: Restrict)
+
+  @@id([postId, mediaAssetId])
+  @@index([postId, position])
+}
+
+// ---------------------------------------------------------------------------
+// Publishing machinery
+// ---------------------------------------------------------------------------
+
+model ScheduledJob {
+  id           String   @id @default(cuid())
+  postTargetId String
+  // Equals the BullMQ job id: the join key between Redis and Postgres.
+  jobId        String   @unique
+  runAt        DateTime @db.Timestamptz(3)
+  state        JobState @default(PENDING)
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(3)
+
+  postTarget PostTarget @relation(fields: [postTargetId], references: [id], onDelete: Cascade)
+
+  @@index([runAt, state])
+  @@index([postTargetId])
+}
+
+model PublishingAttempt {
+  id                   String          @id @default(cuid())
+  postTargetId         String
+  attemptNo            Int
+  startedAt            DateTime        @default(now()) @db.Timestamptz(3)
+  finishedAt           DateTime?       @db.Timestamptz(3)
+  outcome              AttemptOutcome  @default(IN_PROGRESS)
+  httpStatus           Int?
+  platformErrorCode    String?
+  platformErrorMessage String?         @db.Text
+  requestId            String
+  durationMs           Int?
+  platformPostId       String?
+
+  postTarget PostTarget @relation(fields: [postTargetId], references: [id], onDelete: Cascade)
+
+  // Two workers can never write attempt 2 for the same target.
+  @@unique([postTargetId, attemptNo])
+  @@index([startedAt])
+  @@index([outcome])
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?
+  action     AuditAction
+  entityType String
+  entityId   String
+  clientId   String?
+  metadata   Json        @default("{}")
+  ipHash     String?
+  createdAt  DateTime    @default(now()) @db.Timestamptz(3)
+
+  actor  User?  @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  client Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([clientId, createdAt])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+// Idempotency records for operations that must not happen twice: publishing,
+// retrying, duplicating. The unique key makes a duplicate submission a database
+// conflict rather than a second post on a client's page.
+model IdempotencyRecord {
+  id             String   @id @default(cuid())
+  // Scoped to the user and operation so two people publishing different posts
+  // with the same client-generated key cannot collide.
+  key            String
+  userId         String
+  operation      String
+  entityId       String
+  responseStatus Int
+  responseBody   Json?
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  expiresAt      DateTime @db.Timestamptz(3)
+
+  @@unique([key, userId, operation])
+  @@index([expiresAt])
+}
