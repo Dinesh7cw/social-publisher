@@ -15,10 +15,12 @@ Environment: Windows 10.0.26200, Node 24.13.0, Postgres 16 (Docker), Redis 7 (Do
 | --- | --- | --- |
 | Unit (`tests/unit`) | **71 passed** | Crypto, status derivation, adapter request shapes, error classification |
 | Integration (`tests/integration`) | **45 passed** | Real Postgres and Redis: cross-client isolation, unique constraints, publish executor, queue persistence |
-| End-to-end (Playwright) | **53 passed, 2 skipped** | Every screen renders at 1440/768/390, auth guards hold, client CRUD and composer behave |
-| Design inspector (taste-skill) | **0 FAIL, 0 WARN** on the login screen | Contrast, type sizes, layout measurements |
+| End-to-end (Playwright) | **65 passed, 2 skipped** | Every screen at 1440/768/390, auth guards, client CRUD, composer, calendar navigation |
+| Design inspector (taste-skill) | **0 FAIL** | Contrast, type sizes, layout measurements |
 | Typecheck (`tsc --noEmit`) | **clean** | No type errors under `strict` + `noUncheckedIndexedAccess` |
+| Lint (`eslint`) | **clean** | Next core-web-vitals + TypeScript rules |
 | Production build | **clean** | All 38 routes compile |
+| Storage check | **verified** | Buckets provisioned; write, read-back and delete confirmed |
 
 The 2 skipped E2E tests are the phone-navigation test in the desktop and tablet projects, where it is
 not applicable by design.
@@ -167,6 +169,9 @@ Recorded because they are the reason the tests exist.
 | Dialog footer unreachable on a phone | E2E + hit-testing | Sticky header and footer inside a single scroll container |
 | Missing secret produced `UNKNOWN` instead of a determinate failure | `publish.test.ts` | Explicit classification |
 | A leaked `DATABASE_URL` pointed the dev server at the test database | Manual verification | Added a startup guard plus `scripts/which-db.ts` |
+| **Object storage buckets were never created** | `check-storage.ts` | `ensureBuckets()` runs at startup and provisions both buckets plus the public-read policy; the check script proves write/read/delete |
+| S3 container reported unhealthy while serving correctly | `docker compose ps` | The probe asserted a TCP write; a private bucket's 403 is the correct HTTP answer. Now asserts any 200/403 response |
+| Two React `setState`-in-effect anti-patterns | `eslint` (`react-hooks/set-state-in-effect`) | The phone sheet's open state is derived from the pathname it was opened on; the calendar writes state only from promise callbacks and raises `loading` in the event handler that causes a load |
 
 ---
 
@@ -198,7 +203,7 @@ This is the most important section of the report.
 | **Publishing to a real LinkedIn profile or organisation** | ❌ not verified | No LinkedIn app; organisation access needs manual approval that has not been requested |
 | **Publishing to a real X account** | ❌ not verified | No X developer account, no credits |
 | Real OAuth round-trip on any platform | ❌ not verified | Requires credentials and a public callback URL |
-| Media upload against a real S3 provider | ⚠️ partially | Logic exercised against a local S3-compatible server; not against AWS/R2 |
+| Media upload against a real S3 provider | ⚠️ partially | Write, read-back and delete verified against a local S3-compatible server (RustFS); not against AWS/R2 |
 | Video publishing | ❌ not implemented | Every adapter refuses it explicitly rather than pretending |
 | Deployment to a real VPS | ❌ not done | No server available |
 | TLS with a real certificate | ❌ not done | No domain |

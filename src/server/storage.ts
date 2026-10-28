@@ -17,6 +17,9 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  HeadBucketCommand,
+  CreateBucketCommand,
+  PutBucketPolicyCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createHash, randomUUID } from "node:crypto";
@@ -112,6 +115,69 @@ export async function objectExists(bucket: string, key: string): Promise<boolean
 
 export async function deleteObject(bucket: string, key: string): Promise<void> {
   await s3().send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+}
+
+/**
+ * Ensure both buckets exist.
+ *
+ * This runs on demand rather than in a separate init container, so there is no
+ * ordering to get wrong between the app and a one-shot provisioning step. It is
+ * idempotent: creating a bucket that already exists is treated as success.
+ *
+ * The healthcheck in docker-compose cannot verify this, because a 403 on a
+ * private bucket's root is the correct response and looks like a failure to a
+ * port probe.
+ */
+export async function ensureBuckets(): Promise<{ created: string[]; existing: string[] }> {
+  const created: string[] = [];
+  const existing: string[] = [];
+
+  for (const bucket of [PRIVATE_BUCKET(), PUBLIC_BUCKET()]) {
+    try {
+      await s3().send(new HeadBucketCommand({ Bucket: bucket }));
+      existing.push(bucket);
+    } catch {
+      await s3().send(new CreateBucketCommand({ Bucket: bucket }));
+      created.push(bucket);
+
+      // The public bucket must allow anonymous GET so Meta and Instagram can
+      // fetch media. This policy is applied only to the public bucket.
+      if (bucket === PUBLIC_BUCKET()) {
+        await setPublicReadPolicy(bucket).catch((error) => {
+          console.error(
+            `[storage] Could not set a public-read policy on ${bucket}. ` +
+              `Instagram and Facebook publishing will fail until it is set. ` +
+              `${error instanceof Error ? error.message : ""}`,
+          );
+        });
+      }
+    }
+  }
+
+  return { created, existing };
+}
+
+/** Anonymous read on objects, never on the bucket listing. */
+async function setPublicReadPolicy(bucket: string): Promise<void> {
+  const policy = {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Sid: "PublicReadForPlatformFetch",
+        Effect: "Allow",
+        Principal: "*",
+        Action: ["s3:GetObject"],
+        Resource: [`arn:aws:s3:::${bucket}/*`],
+      },
+    ],
+  };
+
+  await s3().send(
+    new PutBucketPolicyCommand({
+      Bucket: bucket,
+      Policy: JSON.stringify(policy),
+    }),
+  );
 }
 
 export function sha256(bytes: Buffer): string {

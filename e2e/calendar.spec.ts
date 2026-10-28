@@ -7,17 +7,26 @@ import { test, expect } from "@playwright/test";
  * screen still loads and its month/week navigation still works end to end.
  */
 test.describe("calendar behaviour", () => {
-  test("loads and shows a month grid", async ({ page }) => {
+  test("loads and shows a month grid", async ({ page }, testInfo) => {
     await page.goto("/calendar");
 
     await expect(page.getByRole("heading", { level: 1, name: "Content calendar" })).toBeVisible();
 
     // Wait for the skeleton to be replaced by the real grid.
     await expect(page.locator(".calendar-grid-skeleton")).toBeHidden({ timeout: 15_000 });
-    await expect(page.locator(".calendar-cell").first()).toBeVisible();
+    await expect(page.locator(".calendar-grid")).toBeVisible();
 
-    // A month view shows 42 cells (six weeks), even when empty.
+    // A month view is built from 42 cells (six weeks).
     await expect(page.locator(".calendar-cell")).toHaveCount(42);
+
+    if (testInfo.project.name === "mobile") {
+      // On a phone the month intentionally collapses to a list of days that have
+      // content, so empty days are hidden. With no posts, nothing is visible, and
+      // that is correct rather than a failure.
+      await expect(page.locator(".calendar-cell:visible")).toHaveCount(0);
+    } else {
+      await expect(page.locator(".calendar-cell").first()).toBeVisible();
+    }
   });
 
   test("navigates to the next month and back", async ({ page }) => {

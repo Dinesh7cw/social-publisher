@@ -21,4 +21,21 @@ export async function register(): Promise<void> {
     // not serve requests.
     throw error;
   }
+
+  // Provision object storage. Idempotent, and non-fatal: the app serves fine
+  // without storage, but media upload would fail, so it is reported loudly
+  // rather than silently.
+  try {
+    const { ensureBuckets } = await import("@/server/storage");
+    const result = await ensureBuckets();
+    if (result.created.length > 0) {
+      console.info(`[startup] Created storage buckets: ${result.created.join(", ")}`);
+    }
+  } catch (error) {
+    console.error(
+      "[startup] Object storage is not reachable. Media upload and Instagram/Facebook " +
+        "publishing will fail until it is.\n" +
+        (error instanceof Error ? error.message : String(error)),
+    );
+  }
 }
