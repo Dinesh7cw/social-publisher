@@ -68,6 +68,7 @@ export async function resetDatabase(): Promise<void> {
       "SocialAccount",
       "ConnectSession",
       "OAuthState",
+      "PlatformCredential",
       "Client",
       "Session",
       "User"

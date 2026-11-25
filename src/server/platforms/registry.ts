@@ -12,8 +12,8 @@
 
 import type { PlatformId } from "@/lib/domain";
 import { PLATFORMS } from "@/lib/domain";
-import { platformFlags } from "@/lib/env";
 import { ApiError } from "@/server/http";
+import { resolveAppCredentials } from "@/server/services/platform-credentials";
 import type { PlatformAdapter } from "./types";
 import { facebookAdapter } from "./facebook/adapter";
 import { instagramAdapter } from "./instagram/adapter";
@@ -31,15 +31,19 @@ export function isImplemented(platform: PlatformId): boolean {
   return ADAPTERS[platform] !== undefined;
 }
 
-/** True when the platform is implemented AND configured AND enabled by flag. */
-export function isPlatformAvailable(platform: PlatformId): boolean {
-  return isImplemented(platform) && platformFlags[platform]();
+/**
+ * True when the platform is implemented AND has app credentials.
+ *
+ * Credentials are the gate, not a separate on/off flag: a flag that says
+ * "enabled" while the app id is missing only moves the failure to the first API
+ * call, where the message is worse. Async because the credentials may live in
+ * the database, where an admin saved them.
+ */
+export async function isPlatformAvailable(platform: PlatformId): Promise<boolean> {
+  return isImplemented(platform) && (await resolveAppCredentials(platform)) !== null;
 }
 
-export type AvailabilityReason =
-  | "available"
-  | "not_built"
-  | "not_configured";
+export type AvailabilityReason = "available" | "not_built" | "not_configured";
 
 export interface PlatformStatus {
   platform: PlatformId;
@@ -49,7 +53,7 @@ export interface PlatformStatus {
   message: string | null;
 }
 
-export function platformStatus(platform: PlatformId): PlatformStatus {
+export async function platformStatus(platform: PlatformId): Promise<PlatformStatus> {
   if (!isImplemented(platform)) {
     return {
       platform,
@@ -58,19 +62,19 @@ export function platformStatus(platform: PlatformId): PlatformStatus {
       message: "Not available yet",
     };
   }
-  if (!platformFlags[platform]()) {
+  if ((await resolveAppCredentials(platform)) === null) {
     return {
       platform,
       available: false,
       reason: "not_configured",
-      message: "Needs credentials from an admin",
+      message: "Credentials needed",
     };
   }
   return { platform, available: true, reason: "available", message: null };
 }
 
-export function allPlatformStatuses(): PlatformStatus[] {
-  return PLATFORMS.map(platformStatus);
+export async function allPlatformStatuses(): Promise<PlatformStatus[]> {
+  return Promise.all(PLATFORMS.map((platform) => platformStatus(platform)));
 }
 
 /**
@@ -80,15 +84,15 @@ export function allPlatformStatuses(): PlatformStatus[] {
  * worker records a permanent failure with an actionable message rather than a
  * stack trace.
  */
-export function getAdapter(platform: PlatformId): PlatformAdapter {
+export async function getAdapter(platform: PlatformId): Promise<PlatformAdapter> {
   const adapter = ADAPTERS[platform];
   if (!adapter) {
     throw new ApiError("PLATFORM_DISABLED", `${platform} posting is not available in this build.`);
   }
-  if (!platformFlags[platform]()) {
+  if ((await resolveAppCredentials(platform)) === null) {
     throw new ApiError(
       "PLATFORM_DISABLED",
-      `${platform} is not enabled yet. An admin needs to complete its setup.`,
+      `${platform} is not enabled yet. An admin needs to add its app credentials.`,
     );
   }
   return adapter;

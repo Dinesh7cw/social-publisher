@@ -5,6 +5,7 @@ import { FacebookAdapter } from "@/server/platforms/facebook/adapter";
 import { XAdapter } from "@/server/platforms/x/adapter";
 import { InstagramAdapter } from "@/server/platforms/instagram/adapter";
 import type { PublishRequest } from "@/server/platforms/types";
+import { isInternetReachable } from "@/server/platforms/validation";
 import { emptyResponse, jsonResponse, stubFetch, type FetchStub } from "../helpers/fetch";
 
 let stub: FetchStub | null = null;
@@ -442,3 +443,45 @@ describe("X adapter", () => {
     expect(tweetBody.media?.media_ids).toEqual(["media-77"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Media reachability
+// ---------------------------------------------------------------------------
+
+describe("media the platform must download", () => {
+  it("tells localhost and private addresses apart from real domains", () => {
+    for (const url of [
+      "http://localhost:9010/bucket/a.jpg",
+      "http://127.0.0.1/a.jpg",
+      "http://192.168.1.20/a.jpg",
+      "http://10.0.0.5/a.jpg",
+      "http://172.20.0.2/a.jpg",
+      "http://[::1]/a.jpg",
+      "http://nas.local/a.jpg",
+    ]) {
+      expect(isInternetReachable(url), url).toBe(false);
+    }
+
+    for (const url of [
+      "https://media.colorwhistle.com/a.jpg",
+      "https://fdomain.com/a.jpg",
+      "https://abc.trycloudflare.com/a.jpg",
+      "http://172.32.0.1/a.jpg",
+    ]) {
+      expect(isInternetReachable(url), url).toBe(true);
+    }
+  });
+
+  it("blocks an Instagram post whose image only exists on localhost", () => {
+    const [image] = imageMedia();
+    const result = new InstagramAdapter().validate({
+      caption: "Hello",
+      media: [{ ...image!, publicUrl: "http://localhost:9010/cw-social-public/a.jpg" }],
+      accountType: "IG_PROFESSIONAL",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain("MEDIA_NOT_REACHABLE");
+  });
+});
+

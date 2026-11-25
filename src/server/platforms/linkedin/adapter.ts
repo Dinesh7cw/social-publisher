@@ -20,6 +20,10 @@
 import { env } from "@/lib/env";
 import {
   PlatformError,
+  type AppCredentials,
+  type CommentRequest,
+  type DeletePublishedRequest,
+  type DeleteResult,
   type PlatformAdapter,
   type PublishRequest,
   type PublishResult,
@@ -54,7 +58,12 @@ export class LinkedInAdapter implements PlatformAdapter {
     return resultFromIssues("LINKEDIN", validateCommon("LINKEDIN", input), input.caption);
   }
 
-  buildAuthorizeUrl(params: { state: string; redirectUri: string; codeChallenge?: string }): string {
+  buildAuthorizeUrl(params: {
+    state: string;
+    redirectUri: string;
+    codeChallenge?: string;
+    credentials: AppCredentials;
+  }): string {
     // openid+profile gives us the member id needed to build urn:li:person:{id}.
     // w_member_social covers personal posts; w_organization_social is requested
     // too and simply ignored by LinkedIn if the app has not been approved for it.
@@ -62,7 +71,7 @@ export class LinkedInAdapter implements PlatformAdapter {
 
     return withQuery(OAUTH_AUTHORIZE, {
       response_type: "code",
-      client_id: env().LINKEDIN_CLIENT_ID,
+      client_id: params.credentials.appId,
       redirect_uri: params.redirectUri,
       state: params.state,
       scope: scopes.join(" "),
@@ -73,6 +82,7 @@ export class LinkedInAdapter implements PlatformAdapter {
     code: string;
     redirectUri: string;
     codeVerifier?: string;
+    credentials: AppCredentials;
   }): Promise<{ ok: true; tokens: TokenSet } | { ok: false; error: PlatformError }> {
     try {
       const response = await platformRequest({
@@ -83,8 +93,8 @@ export class LinkedInAdapter implements PlatformAdapter {
           grant_type: "authorization_code",
           code: params.code,
           redirect_uri: params.redirectUri,
-          client_id: env().LINKEDIN_CLIENT_ID ?? "",
-          client_secret: env().LINKEDIN_CLIENT_SECRET ?? "",
+          client_id: params.credentials.appId,
+          client_secret: params.credentials.appSecret,
         }),
         requestId: "oauth-exchange-li",
       });
@@ -125,7 +135,7 @@ export class LinkedInAdapter implements PlatformAdapter {
     }
   }
 
-  async refresh(refreshToken: string): Promise<RefreshResult> {
+  async refresh(refreshToken: string, credentials: AppCredentials): Promise<RefreshResult> {
     try {
       const response = await platformRequest({
         platform: "LINKEDIN",
@@ -134,8 +144,8 @@ export class LinkedInAdapter implements PlatformAdapter {
         body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: refreshToken,
-          client_id: env().LINKEDIN_CLIENT_ID ?? "",
-          client_secret: env().LINKEDIN_CLIENT_SECRET ?? "",
+          client_id: credentials.appId,
+          client_secret: credentials.appSecret,
         }),
         requestId: "oauth-refresh-li",
       });
@@ -320,7 +330,7 @@ export class LinkedInAdapter implements PlatformAdapter {
       const body: Record<string, unknown> = {
         author,
         commentary: request.caption,
-        visibility: "PUBLIC",
+        visibility: request.options?.visibility ?? "PUBLIC",
         distribution: {
           feedDistribution: "MAIN_FEED",
           targetEntities: [],
@@ -384,6 +394,62 @@ export class LinkedInAdapter implements PlatformAdapter {
         platformPostId: postUrn,
         platformPostUrl: url,
       };
+    } catch (error) {
+      return { ok: false, error: asLinkedInError(error) };
+    }
+  }
+
+  /**
+   * Delete a published post.
+   *
+   * `DELETE /rest/posts/{urn}` returns 204 with no body. The URN must be
+   * URL-encoded: an unencoded `urn:li:share:123` breaks path parsing.
+   */
+  async deletePublished(request: DeletePublishedRequest): Promise<DeleteResult> {
+    try {
+      await platformRequest({
+        platform: "LINKEDIN",
+        url: `${API_BASE}/posts/${encodeURIComponent(request.platformPostId)}`,
+        method: "DELETE",
+        accessToken: request.accessToken,
+        headers: headers(),
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: asLinkedInError(error) };
+    }
+  }
+
+  /**
+   * First comment on a post.
+   *
+   * Goes through the socialActions endpoint rather than the Posts API, and it
+   * needs the actor URN as well as the post URN.
+   */
+  async commentOnPost(request: CommentRequest): Promise<{ ok: boolean; error?: PlatformError }> {
+    const actor =
+      request.accountType === "ORGANIZATION"
+        ? `urn:li:organization:${request.externalId}`
+        : `urn:li:person:${request.externalId}`;
+
+    try {
+      await platformRequest({
+        platform: "LINKEDIN",
+        url: `${API_BASE}/socialActions/${encodeURIComponent(request.platformPostId)}/comments`,
+        method: "POST",
+        accessToken: request.accessToken,
+        headers: headers(),
+        body: {
+          actor,
+          object: request.platformPostId,
+          message: { text: request.body },
+        },
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+      return { ok: true };
     } catch (error) {
       return { ok: false, error: asLinkedInError(error) };
     }

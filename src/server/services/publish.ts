@@ -23,7 +23,8 @@ import { recordAuditSafe } from "@/server/audit";
 import { ApiError } from "@/server/http";
 import { getAccountCredentials, isTokenExpired } from "@/server/auth/token-access";
 import { getAdapter } from "@/server/platforms/registry";
-import { PlatformError, type PublishRequest } from "@/server/platforms/types";
+import { resolveAppCredentials } from "@/server/services/platform-credentials";
+import { PlatformError, type PlatformAdapter, type PlatformOptions, type PublishRequest } from "@/server/platforms/types";
 import { findLinks } from "@/server/platforms/capabilities";
 import { encryptSecret } from "@/lib/crypto";
 import { derivePostStatus, type TargetStatusId } from "@/lib/domain";
@@ -74,13 +75,20 @@ async function ensureFreshToken(params: {
     return { accessToken: params.accessToken, reconnect: false };
   }
 
-  const adapter = getAdapter(params.platform as never);
+  const adapter = await getAdapter(params.platform as never);
   if (!adapter.refresh || !params.refreshToken) {
     // No way to refresh: the team must reconnect.
     return { accessToken: null, reconnect: true };
   }
 
-  const refreshed = await adapter.refresh(params.refreshToken);
+  const appCredentials = await resolveAppCredentials(params.platform as never);
+  if (!appCredentials) return { accessToken: null, reconnect: true };
+
+  const refreshed = await adapter.refresh(params.refreshToken, {
+    appId: appCredentials.appId,
+    appSecret: appCredentials.appSecret,
+    version: appCredentials.config.version,
+  });
   if (!refreshed.ok || !refreshed.tokens) {
     return { accessToken: null, reconnect: true };
   }
@@ -110,9 +118,71 @@ async function ensureFreshToken(params: {
   return { accessToken: refreshed.tokens.accessToken, reconnect: false };
 }
 
+/**
+ * Post the composer's "first comment" after a successful publish.
+ *
+ * Failure here never fails the publish: the post itself is live, and reporting
+ * it as a failed publish would invite a duplicate. It returns a message instead,
+ * which is kept on the published target so the History tab shows that the
+ * comment is missing — otherwise it disappears into a log nobody reads.
+ */
+async function postFirstComment(params: {
+  adapter: PlatformAdapter;
+  request: PublishRequest;
+  platformPostId: string;
+}): Promise<string | null> {
+  const body = params.request.options?.firstComment?.trim();
+  if (!body) return null;
+
+  if (!params.adapter.commentOnPost) {
+    logger.warn(
+      { platform: params.request.platform, targetId: params.request.targetId },
+      "first comment requested but this platform adapter cannot comment",
+    );
+    return "Published, but this platform cannot take a first comment. Add it by hand.";
+  }
+
+  try {
+    const result = await params.adapter.commentOnPost({
+      platformPostId: params.platformPostId,
+      externalId: params.request.externalId,
+      accountType: params.request.accountType,
+      accessToken: params.request.accessToken,
+      body,
+      requestId: `${params.request.requestId}:comment`,
+      signal: params.request.signal,
+    });
+
+    if (!result.ok) {
+      logger.warn(
+        {
+          platform: params.request.platform,
+          targetId: params.request.targetId,
+          code: result.error?.code,
+          message: result.error?.message,
+        },
+        "published, but the first comment was refused",
+      );
+      return `Published, but the first comment was refused: ${
+        result.error?.userMessage ?? "the platform did not say why"
+      } Reconnecting the account usually fixes this.`;
+    }
+    return null;
+  } catch (error) {
+    logger.warn(
+      {
+        platform: params.request.platform,
+        targetId: params.request.targetId,
+        error: error instanceof Error ? error.message : "unknown",
+      },
+      "published, but the first comment could not be sent",
+    );
+    return "Published, but the first comment could not be sent. Add it by hand.";
+  }
+}
+
 /** Mark an account as needing the team's attention. */
-async function markAccountNeedsReconnect(accountId: string, reason: string): Promise<void> {
-  await prisma.socialAccount.update({
+async function markAccountNeedsReconnect(accountId: string, reason: string): Promise<void> {  await prisma.socialAccount.update({
     where: { id: accountId },
     data: { status: "EXPIRED" },
   });
@@ -135,7 +205,7 @@ export async function executePublish(params: {
   const target = await prisma.postTarget.findUnique({
     where: { id: params.postTargetId },
     include: {
-      post: { select: { id: true, clientId: true, baseCaption: true } },
+      post: { select: { id: true, clientId: true, baseCaption: true, deletedAt: true } },
       socialAccount: {
         select: {
           id: true,
@@ -151,6 +221,13 @@ export async function executePublish(params: {
 
   if (!target) {
     logger.error({ targetId: params.postTargetId }, "publish job references a missing target");
+    return null;
+  }
+
+  // Deleted between enqueue and delivery. Publishing now would create a post the
+  // team believes they removed, so this is a hard stop rather than a retry.
+  if (target.post.deletedAt) {
+    logger.info({ targetId: target.id }, "publish skipped: post was deleted");
     return null;
   }
 
@@ -224,7 +301,7 @@ export async function executePublish(params: {
     });
 
     // --- Dispatch ----------------------------------------------------------
-    const adapter = getAdapter(target.socialAccount.platform as never);
+    const adapter = await getAdapter(target.socialAccount.platform as never);
 
     const request: PublishRequest = {
       targetId: target.id,
@@ -246,6 +323,7 @@ export async function executePublish(params: {
       accessToken: fresh.accessToken,
       externalId: target.socialAccount.externalId,
       accountType: target.socialAccount.accountType,
+      options: (target.platformOptions as PlatformOptions | null) ?? null,
       requestId: params.requestId,
       signal: params.signal,
     };
@@ -253,6 +331,12 @@ export async function executePublish(params: {
     const result = await adapter.publish(request);
 
     if (result.ok) {
+      const commentNotice = await postFirstComment({
+        adapter,
+        request,
+        platformPostId: result.platformPostId,
+      });
+
       return await finishAttempt({
         attemptId: attempt.id,
         targetId: target.id,
@@ -261,6 +345,7 @@ export async function executePublish(params: {
         platformPostId: result.platformPostId,
         platformPostUrl: result.platformPostUrl,
         httpStatus: 200,
+        publishedNotice: commentNotice,
       });
     }
 
@@ -370,6 +455,8 @@ async function finishAttempt(params: {
   platformErrorCode?: string;
   httpStatus: number | null;
   retryAfterSeconds?: number | null;
+  /** A published post that still needs a human, e.g. its first comment failed. */
+  publishedNotice?: string | null;
 }): Promise<PublishOutcome> {
   const durationMs = Date.now() - params.startedAt;
 
@@ -415,8 +502,8 @@ async function finishAttempt(params: {
               platformPostId: params.platformPostId,
               platformPostUrl: params.platformPostUrl ?? null,
               publishedAt: new Date(),
-              lastErrorCode: null,
-              lastErrorMessage: null,
+              lastErrorCode: params.publishedNotice ? "FIRST_COMMENT_FAILED" : null,
+              lastErrorMessage: params.publishedNotice ?? null,
             }
           : {
               lastErrorCode: params.errorCode ?? null,

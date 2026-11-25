@@ -11,6 +11,7 @@ import {
   type TargetStatusId,
 } from "@/lib/domain";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DeletePostDialog } from "@/components/ui/delete-post-dialog";
 
 interface HistoryRow {
   id: string;
@@ -47,13 +48,14 @@ function formatTime(iso: string): string {
   });
 }
 
-export function HistoryTable() {
+export function HistoryTable({ clientId }: { clientId?: string } = {}) {
   const [rows, setRows] = useState<HistoryRow[]>([]);
   const [status, setStatus] = useState<StatusFilter>("ALL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<HistoryRow | null>(null);
   const [confirmUnknown, setConfirmUnknown] = useState<HistoryRow | null>(null);
+  const [deleting, setDeleting] = useState<HistoryRow | null>(null);
   const [pending, setPending] = useState(false);
 
   const load = useCallback(async (nextStatus: StatusFilter) => {
@@ -61,6 +63,7 @@ export function HistoryTable() {
     setError(null);
 
     const params = new URLSearchParams({ limit: "50" });
+    if (clientId) params.set("clientId", clientId);
     if (nextStatus === "FAILED") {
       // The two failure states read as one idea to the team.
       params.set("status", "FAILED_PERMANENT");
@@ -90,7 +93,7 @@ export function HistoryTable() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clientId]);
 
   useEffect(() => {
     // Fetching is exactly what an effect is for: synchronising with an external
@@ -269,8 +272,8 @@ export function HistoryTable() {
                       </span>
                     </td>
                     <td>
-                      {isRetryable(row.status) ? (
-                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                        {isRetryable(row.status) ? (
                           <button
                             type="button"
                             className="btn btn-secondary btn-sm"
@@ -278,8 +281,15 @@ export function HistoryTable() {
                           >
                             Retry
                           </button>
-                        </div>
-                      ) : null}
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setDeleting(row)}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -310,6 +320,27 @@ export function HistoryTable() {
           pending={pending}
           onCancel={() => setConfirmUnknown(null)}
           onConfirm={() => void doRetry(confirmUnknown, true)}
+        />
+      ) : null}
+
+      {/*
+        Deleting from a history row deletes the whole post, not just this account,
+        because that is what the team means by "delete the post". The dialog says
+        so, and reports each platform's outcome separately.
+      */}
+      {deleting ? (
+        <DeletePostDialog
+          postId={deleting.postId}
+          publishedPlatforms={
+            deleting.platformPostId && deleting.status === "PUBLISHED"
+              ? [PLATFORM_SHORT[deleting.platform]]
+              : []
+          }
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            void load(status);
+          }}
         />
       ) : null}
     </>

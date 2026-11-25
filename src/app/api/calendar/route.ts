@@ -53,6 +53,7 @@ export const GET = route(async (request: Request) => {
 
   const posts = await prisma.post.findMany({
     where: {
+      deletedAt: null,
       OR: [
         { scheduledAt: { gte: start, lt: end } },
         // Published posts are keyed off publishedAt so the calendar shows when

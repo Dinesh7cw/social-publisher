@@ -9,14 +9,17 @@ coverage/
 # Env and secrets — never commit
 .env
 .env.local
+.env.production
 .env.*.local
 !.env.example
+!.env.production.example
 
 # Prisma generated client
 src/generated/
 
 # Taste skill working files
 .taste-skill/
+.screens/
 
 # Test artefacts
 test-results/

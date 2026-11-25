@@ -54,10 +54,10 @@ export async function getDashboardData(): Promise<DashboardData> {
   ] = await Promise.all([
     prisma.client.count({ where: { status: "ACTIVE" } }),
     prisma.socialAccount.count({ where: { status: "CONNECTED" } }),
-    prisma.post.count({ where: { status: "DRAFT" } }),
-    prisma.post.count({ where: { status: { in: ["SCHEDULED", "PUBLISHING"] } } }),
-    prisma.post.count({ where: { status: "PUBLISHED" } }),
-    prisma.post.count({ where: { status: { in: ["FAILED", "PARTIAL"] } } }),
+    prisma.post.count({ where: { deletedAt: null, status: "DRAFT" } }),
+    prisma.post.count({ where: { deletedAt: null, status: { in: ["SCHEDULED", "PUBLISHING"] } } }),
+    prisma.post.count({ where: { deletedAt: null, status: "PUBLISHED" } }),
+    prisma.post.count({ where: { deletedAt: null, status: { in: ["FAILED", "PARTIAL"] } } }),
 
     prisma.socialAccount.groupBy({
       by: ["platform", "status"],

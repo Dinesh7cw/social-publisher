@@ -14,7 +14,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Count only targets that genuinely need a human: a failed publish that is
   // already being retried is not a task for the team.
   const needsAttention = await prisma.postTarget.count({
-    where: { status: { in: ["FAILED_PERMANENT", "UNKNOWN"] } },
+    where: {
+      status: { in: ["FAILED_PERMANENT", "UNKNOWN"] },
+      // A deleted post's failures are no longer the team's problem.
+      post: { deletedAt: null },
+    },
   });
 
   return (

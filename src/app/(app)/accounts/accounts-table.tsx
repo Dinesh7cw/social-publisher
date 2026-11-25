@@ -1,31 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
-import { PLATFORM_SHORT, type PlatformId } from "@/lib/domain";
+import { PLATFORM_SHORT } from "@/lib/domain";
+import type { AccountRow, PlatformAvailability } from "@/server/services/accounts";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
-export interface AccountRow {
-  id: string;
-  clientName: string;
-  platform: PlatformId;
-  displayName: string;
-  accountType: string;
-  status: string;
-  tokenLabel: string;
-  tokenTone: "positive" | "warning" | "negative" | "neutral";
-  lastVerifiedAt: string | null;
-  postCount: number;
-}
-
-export interface PlatformAvailability {
-  platform: PlatformId;
-  available: boolean;
-  reason: string;
-  message: string | null;
-  label: string;
-  short: string;
-}
+export type { AccountRow, PlatformAvailability };
 
 const ACCOUNT_TYPE_LABEL: Record<string, string> = {
   PAGE: "Facebook Page",
@@ -39,10 +21,13 @@ export function AccountsTable({
   rows,
   platforms,
   canDisconnect,
+  credentialsHref,
 }: {
   rows: AccountRow[];
   platforms: PlatformAvailability[];
   canDisconnect: boolean;
+  /** Where to send someone to add app credentials, when that page is in reach. */
+  credentialsHref?: string;
 }) {
   const [disconnecting, setDisconnecting] = useState<AccountRow | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,9 +82,18 @@ export function AccountsTable({
                   <span className="pill pill-neutral">{platform.short}</span>
                   <span className="small muted">
                     {platform.message ?? "Unavailable"}
-                    {platform.reason === "not_configured"
-                      ? ". The platform app credentials have not been added to this deployment."
-                      : "."}
+                    {platform.reason === "not_configured" ? (
+                      <>
+                        . {credentialsHref ? (
+                          <Link href={credentialsHref}>Add the app credentials</Link>
+                        ) : (
+                          "The platform app credentials have not been added to this deployment"
+                        )}
+                        .
+                      </>
+                    ) : (
+                      "."
+                    )}
                   </span>
                 </li>
               ))}

@@ -30,7 +30,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={dmSans.variable}>
-      <body>{children}</body>
+      {/* Browser extensions stamp attributes onto <body> before React hydrates
+          (e.g. `__processed_<uuid>__`). This only silences <body>'s own
+          attributes; mismatches inside the page are still reported. */}
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

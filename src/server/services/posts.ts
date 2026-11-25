@@ -11,10 +11,16 @@
 import { randomUUID } from "node:crypto";
 
 import { prisma } from "@/server/db";
+import { Prisma } from "@/generated/prisma/client";
 import { ApiError, invalid, notFound } from "@/server/http";
 import { recordAuditSafe } from "@/server/audit";
-import { derivePostStatus, type TargetStatusId, type PostStatusId } from "@/lib/domain";
-import { findAdapter } from "@/server/platforms/registry";
+import {
+  derivePostStatus,
+  isEditablePostStatus,
+  type TargetStatusId,
+  type PostStatusId,
+} from "@/lib/domain";
+import { findAdapter, platformStatus } from "@/server/platforms/registry";
 import { enqueueTarget, jobIdFor, cancelJob } from "@/server/queue/publish-queue";
 import { logger } from "@/server/logger";
 
@@ -57,8 +63,13 @@ export async function validatePost(postId: string): Promise<{
 
   if (!post) throw notFound("Post not found.");
 
-  const results: TargetValidationResult[] = post.targets.map((target) => {
+  const statuses = await Promise.all(
+    post.targets.map((target) => platformStatus(target.socialAccount.platform as never)),
+  );
+
+  const results: TargetValidationResult[] = post.targets.map((target, index) => {
     const adapter = findAdapter(target.socialAccount.platform as never);
+    const status = statuses[index]!;
 
     if (!adapter) {
       return {
@@ -70,6 +81,26 @@ export async function validatePost(postId: string): Promise<{
           {
             code: "PLATFORM_UNAVAILABLE",
             message: `${target.socialAccount.platform} publishing is not available in this build.`,
+          },
+        ],
+      };
+    }
+
+    // Implemented but not configured is still not publishable. Without this
+    // check the composer would accept a post that the worker can only fail
+    // permanently, which is the worst of both outcomes.
+    if (!status.available) {
+      return {
+        socialAccountId: target.socialAccount.id,
+        platform: target.socialAccount.platform,
+        accountName: target.socialAccount.displayName,
+        ok: false,
+        issues: [
+          {
+            code: "PLATFORM_NOT_CONFIGURED",
+            message:
+              status.message ??
+              `${target.socialAccount.platform} cannot publish until an admin completes its setup.`,
           },
         ],
       };
@@ -129,7 +160,11 @@ export interface CreatePostInput {
   clientId: string;
   baseCaption: string;
   mediaAssetIds: string[];
-  targets: Array<{ socialAccountId: string; caption?: string | null }>;
+  targets: Array<{
+    socialAccountId: string;
+    caption?: string | null;
+    options?: Record<string, unknown> | null;
+  }>;
   authorId: string;
 }
 
@@ -182,6 +217,9 @@ export async function createPost(input: CreatePostInput): Promise<{ id: string }
           // platform-specific caption the team wrote deliberately.
           caption: target.caption?.trim() ? target.caption : input.baseCaption,
           status: "PENDING",
+          // Prisma needs the JSON null sentinel to store SQL NULL rather than a
+          // JSON null value.
+          platformOptions: (target.options ?? undefined) as never,
         })),
       },
       media: {
@@ -200,6 +238,144 @@ export async function createPost(input: CreatePostInput): Promise<{ id: string }
     entityId: post.id,
     clientId: input.clientId,
     metadata: { targetCount: input.targets.length, mediaCount: input.mediaAssetIds.length },
+  });
+
+  return { id: post.id };
+}
+
+export interface UpdatePostInput {
+  postId: string;
+  actorId: string;
+  baseCaption?: string;
+  mediaAssetIds?: string[];
+  /** The full target list. Omitted means "leave targets alone". */
+  targets?: CreatePostInput["targets"];
+}
+
+/**
+ * Save changes to an existing post.
+ *
+ * Accounts can be added or removed only while the post is a draft: a scheduled
+ * target already has a queued job, and a published one is live, so changing
+ * the set there would orphan a job or silently drop a live post from the
+ * record. Captions, extras and media stay editable for every editable status.
+ */
+export async function updatePost(input: UpdatePostInput): Promise<{ id: string }> {
+  const post = await prisma.post.findUnique({
+    where: { id: input.postId },
+    select: {
+      id: true,
+      clientId: true,
+      status: true,
+      deletedAt: true,
+      baseCaption: true,
+      targets: { select: { id: true, socialAccountId: true } },
+    },
+  });
+
+  if (!post || post.deletedAt) throw notFound("Post not found.");
+  if (!isEditablePostStatus(post.status as PostStatusId)) {
+    throw new ApiError(
+      "TARGET_NOT_PUBLISHABLE",
+      "This post has already been published or is publishing, so it cannot be edited.",
+    );
+  }
+
+  const baseCaption = input.baseCaption ?? post.baseCaption;
+  const existingByAccount = new Map(post.targets.map((t) => [t.socialAccountId, t]));
+
+  let removedTargetIds: string[] = [];
+
+  if (input.targets) {
+    const accountIds = input.targets.map((t) => t.socialAccountId);
+    if (accountIds.length === 0) throw invalid("Choose at least one account.");
+    if (new Set(accountIds).size !== accountIds.length) {
+      throw invalid("The same account was selected twice.");
+    }
+
+    const wanted = new Set(accountIds);
+    const added = accountIds.filter((id) => !existingByAccount.has(id));
+    removedTargetIds = post.targets.filter((t) => !wanted.has(t.socialAccountId)).map((t) => t.id);
+
+    if (post.status !== "DRAFT" && (added.length > 0 || removedTargetIds.length > 0)) {
+      throw invalid("Accounts can only be changed while the post is a draft.");
+    }
+
+    if (added.length > 0) {
+      const owned = await prisma.socialAccount.count({
+        where: { id: { in: added }, clientId: post.clientId },
+      });
+      if (owned !== added.length) {
+        throw notFound("One of the selected accounts does not belong to this client.");
+      }
+    }
+  }
+
+  if (input.mediaAssetIds && input.mediaAssetIds.length > 0) {
+    const owned = await prisma.mediaAsset.count({
+      where: { id: { in: input.mediaAssetIds }, clientId: post.clientId },
+    });
+    if (owned !== input.mediaAssetIds.length) {
+      throw notFound("One of the attached media files does not belong to this client.");
+    }
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.post.update({ where: { id: post.id }, data: { baseCaption } });
+
+    if (input.targets) {
+      if (removedTargetIds.length > 0) {
+        await tx.postTarget.deleteMany({ where: { id: { in: removedTargetIds } } });
+      }
+
+      for (const target of input.targets) {
+        const caption = target.caption?.trim() ? target.caption : baseCaption;
+        const platformOptions = target.options ? (target.options as never) : Prisma.DbNull;
+        const existing = existingByAccount.get(target.socialAccountId);
+
+        if (existing) {
+          await tx.postTarget.update({
+            where: { id: existing.id },
+            data: { caption, platformOptions },
+          });
+        } else {
+          await tx.postTarget.create({
+            data: {
+              postId: post.id,
+              socialAccountId: target.socialAccountId,
+              caption,
+              status: "PENDING",
+              platformOptions,
+            },
+          });
+        }
+      }
+    }
+
+    if (input.mediaAssetIds) {
+      await tx.postMedia.deleteMany({ where: { postId: post.id } });
+      if (input.mediaAssetIds.length > 0) {
+        await tx.postMedia.createMany({
+          data: input.mediaAssetIds.map((mediaAssetId, index) => ({
+            postId: post.id,
+            mediaAssetId,
+            position: index,
+          })),
+        });
+      }
+    }
+  });
+
+  await recordAuditSafe({
+    actorId: input.actorId,
+    action: "POST_UPDATED",
+    entityType: "Post",
+    entityId: post.id,
+    clientId: post.clientId,
+    metadata: {
+      targetCount: input.targets?.length ?? post.targets.length,
+      mediaCount: input.mediaAssetIds?.length ?? null,
+    },
   });
 
   return { id: post.id };
@@ -274,6 +450,7 @@ export async function schedulePost(params: {
 }): Promise<void> {
   const post = await prisma.post.findUnique({ where: { id: params.postId } });
   if (!post) throw notFound("Post not found.");
+  if (post.deletedAt) throw notFound("Post not found.");
 
   if (post.status === "PUBLISHED" || post.status === "PUBLISHING") {
     throw new ApiError("TARGET_NOT_PUBLISHABLE", "This post has already been published.");
@@ -328,6 +505,7 @@ export async function publishNow(params: {
 }): Promise<void> {
   const post = await prisma.post.findUnique({ where: { id: params.postId } });
   if (!post) throw notFound("Post not found.");
+  if (post.deletedAt) throw notFound("Post not found.");
 
   if (post.status === "PUBLISHED") {
     throw new ApiError("TARGET_NOT_PUBLISHABLE", "This post has already been published.");
@@ -373,6 +551,13 @@ export async function retryTarget(params: {
     throw new ApiError(
       "TARGET_NOT_PUBLISHABLE",
       "This post is already live on that platform. Publishing again would duplicate it.",
+    );
+  }
+
+  if (target.status === "DELETED") {
+    throw new ApiError(
+      "TARGET_NOT_PUBLISHABLE",
+      "This copy was removed from the platform. Create a new post if it needs to go back up.",
     );
   }
 

@@ -89,7 +89,7 @@ export async function listClients(params: {
     orderBy: [{ status: "asc" }, { name: "asc" }],
     include: {
       _count: { select: { accounts: true } },
-      posts: { select: { status: true } },
+      posts: { where: { deletedAt: null }, select: { status: true } },
     },
   });
 
@@ -144,7 +144,7 @@ export async function getClient(id: string): Promise<ClientSummary> {
     where: { id },
     include: {
       _count: { select: { accounts: true } },
-      posts: { select: { status: true, scheduledAt: true } },
+      posts: { where: { deletedAt: null }, select: { status: true, scheduledAt: true } },
     },
   });
 

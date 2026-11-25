@@ -97,6 +97,39 @@ describe("publish executor", () => {
     expect(attempt?.platformPostId).toBe("page_post_123");
   });
 
+  it("keeps a post published when its first comment is refused, and says so", async () => {
+    const { postId, targetId } = await makePublishablePost();
+    const db = testDb();
+
+    await db.postTarget.update({
+      where: { id: targetId },
+      data: { platformOptions: { firstComment: "#launch #cw" } },
+    });
+
+    stub = stubFetch((call) =>
+      call.url.includes("/comments")
+        ? jsonResponse(
+            { error: { message: "(#10) Permission denied", type: "OAuthException", code: 10 } },
+            403,
+          )
+        : jsonResponse({ id: "page_post_with_comment" }),
+    );
+
+    const outcome = await executePublish({ postTargetId: targetId, attemptNo: 1, requestId: "c1" });
+    expect(outcome?.status).toBe("PUBLISHED");
+    expect(stub.calls.some((call) => call.url.includes("/page_post_with_comment/comments"))).toBe(true);
+
+    // A failed comment must not be reported as a failed publish — that would
+    // invite a retry and a duplicate post — but it must be visible.
+    const target = await db.postTarget.findUniqueOrThrow({ where: { id: targetId } });
+    expect(target.status).toBe("PUBLISHED");
+    expect(target.lastErrorCode).toBe("FIRST_COMMENT_FAILED");
+    expect(target.lastErrorMessage).toMatch(/first comment was refused/i);
+
+    const post = await db.post.findUniqueOrThrow({ where: { id: postId } });
+    expect(post.status).toBe("PUBLISHED");
+  });
+
   it("does not publish twice when the same job is delivered again", async () => {
     const { targetId } = await makePublishablePost();
 

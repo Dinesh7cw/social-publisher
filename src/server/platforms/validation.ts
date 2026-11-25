@@ -16,6 +16,40 @@ function mb(bytes: number): string {
 }
 
 /**
+ * Whether a platform's servers could fetch this URL.
+ *
+ * Only rules out addresses that are unreachable by construction — loopback,
+ * private ranges, link-local, `.local` — so a real domain is never blocked here.
+ */
+export function isInternetReachable(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  } catch {
+    return false;
+  }
+
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return false;
+  // IPv6 literals only: a hostname like "fdomain.com" must not match.
+  if (host.includes(":")) {
+    if (host === "::1" || host.startsWith("fe80:") || /^f[cd][0-9a-f]{0,2}:/.test(host)) return false;
+    return true;
+  }
+
+  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/);
+  if (ipv4) {
+    const a = Number(ipv4[1]);
+    const b = Number(ipv4[2]);
+    if (a === 127 || a === 10 || a === 0) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 169 && b === 254) return false;
+  }
+
+  return true;
+}
+
+/**
  * The checks that apply to every platform.
  *
  * Returns issues rather than throwing so the composer can show all problems at
@@ -83,6 +117,8 @@ export function validateCommon(platform: string, input: ValidationInput): Valida
     });
   }
 
+  const unreachable: string[] = [];
+
   for (const item of input.media) {
     const allowed =
       item.kind === "IMAGE" ? caps.supportedImageMimeTypes : caps.supportedVideoMimeTypes;
@@ -111,7 +147,21 @@ export function validateCommon(platform: string, input: ValidationInput): Valida
         field: "media",
         message: `${caps.platform} needs to fetch the media from a public URL. Re-upload this file.`,
       });
+    } else if (caps.requiresPublicMediaUrl && item.publicUrl && !isInternetReachable(item.publicUrl)) {
+      unreachable.push(item.publicUrl);
     }
+  }
+
+  // One issue for the whole set: every file shares the same storage host, so
+  // repeating the message per image only buries it.
+  if (unreachable.length > 0) {
+    const host = new URL(unreachable[0]!).host;
+    const files = unreachable.length === 1 ? "this file" : `these ${unreachable.length} files`;
+    issues.push({
+      code: "MEDIA_NOT_REACHABLE",
+      field: "media",
+      message: `${caps.platform} downloads media from its own servers, and ${host} is only reachable from this machine. Set MEDIA_PUBLIC_BASE_URL to a public address (your live domain or a tunnel) and upload ${files} again.`,
+    });
   }
 
   return issues;

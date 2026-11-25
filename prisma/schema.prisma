@@ -62,6 +62,8 @@ enum PostStatus {
   PARTIAL
   FAILED
   CANCELLED
+  /// Every target was published and has since been removed from its platform.
+  DELETED
 }
 
 enum TargetStatus {
@@ -74,6 +76,8 @@ enum TargetStatus {
   UNKNOWN
   SKIPPED
   CANCELLED
+  /// Was live, and has been removed from the platform.
+  DELETED
 }
 
 enum MediaKind {
@@ -114,6 +118,10 @@ enum AuditAction {
   POST_CANCELLED
   POST_DUPLICATED
   POST_RETRY
+  POST_DELETED
+  POST_UNPUBLISHED
+  CREDENTIALS_SAVED
+  CREDENTIALS_REMOVED
   MEDIA_UPLOADED
   USER_CREATED
   USER_UPDATED
@@ -145,6 +153,7 @@ model User {
   posts             Post[]          @relation("PostAuthor")
   mediaUploaded     MediaAsset[]    @relation("MediaUploader")
   auditLogs         AuditLog[]      @relation("AuditActor")
+  credentialsSaved  PlatformCredential[] @relation("CredentialUpdater")
 
   @@index([isActive])
 }
@@ -254,12 +263,39 @@ model SocialAccountSecret {
   socialAccountId    String    @unique
   accessTokenCipher  String
   refreshTokenCipher String?
+  /// The connecting user's own token, separate from the Page/account token that
+  /// publishing uses. Meta's Instagram delete endpoint requires a *user* token
+  /// with `instagram_manage_contents`, so publishing credentials are not enough.
+  userTokenCipher    String?
+  /// When the user token above stops working. Meta issues ~60 days, so this is
+  /// what the weekly extender reads to decide whether to renew it.
+  userTokenExpiresAt DateTime? @db.Timestamptz(3)
   tokenType          String?
   keyId              String
   rotatedAt          DateTime? @db.Timestamptz(3)
   updatedAt          DateTime  @updatedAt @db.Timestamptz(3)
 
   socialAccount SocialAccount @relation(fields: [socialAccountId], references: [id], onDelete: Cascade)
+}
+
+/// The developer-app credentials for a network: one Meta app, one LinkedIn app,
+/// one X app. These are agency-wide, not per client — a single app registers the
+/// redirect URIs and authorises every client's accounts — but they are stored
+/// here so an admin can set them from the UI instead of editing .env on a
+/// running deployment.
+model PlatformCredential {
+  /// One row per platform: a second Meta app would make token exchange
+  /// ambiguous, so the platform itself is the key.
+  platform        Platform @id
+  appId           String
+  /// AES-256-GCM envelope. Never selected into a page; write-only once stored.
+  appSecretCipher String
+  /// Non-secret settings the adapter needs: graph version, API version.
+  config          Json     @default("{}")
+  updatedAt       DateTime @updatedAt @db.Timestamptz(3)
+  updatedById     String?
+
+  updatedBy User? @relation("CredentialUpdater", fields: [updatedById], references: [id], onDelete: SetNull)
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +312,10 @@ model Post {
   scheduledTimeZone String?
   publishedAt       DateTime?  @db.Timestamptz(3)
   duplicatedFromId  String?
+  /// Set when the team deletes the post from the app. Rows are kept so the
+  /// audit trail and any platform id survive; every list query filters them out.
+  deletedAt         DateTime?  @db.Timestamptz(3)
+  deletedById       String?
   createdAt         DateTime   @default(now()) @db.Timestamptz(3)
   updatedAt         DateTime   @updatedAt @db.Timestamptz(3)
 
@@ -290,6 +330,7 @@ model Post {
   @@index([scheduledAt])
   @@index([status])
   @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model PostTarget {
@@ -304,6 +345,11 @@ model PostTarget {
   lastErrorCode    String?
   lastErrorMessage String?      @db.Text
   publishedAt      DateTime?    @db.Timestamptz(3)
+  /// Per-platform extras: first comment, alt text, user tags, visibility,
+  /// reply settings. Stored as JSON because no two platforms share a schema.
+  platformOptions  Json?
+  /// When the post was removed from this platform.
+  deletedAt        DateTime?    @db.Timestamptz(3)
   createdAt        DateTime     @default(now()) @db.Timestamptz(3)
   updatedAt        DateTime     @updatedAt @db.Timestamptz(3)
 

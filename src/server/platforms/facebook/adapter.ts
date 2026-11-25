@@ -13,13 +13,24 @@
  */
 
 import { env } from "@/lib/env";
-import { PlatformError, type DiscoveredAccount, type PlatformAdapter, type PublishRequest, type PublishResult, type TokenSet, type ValidationInput, type ValidationResult } from "../types";
+import { PlatformError, type AppCredentials, type CommentRequest, type DeletePublishedRequest, type DeleteResult, type DiscoveredAccount, type PlatformAdapter, type PublishRequest, type PublishResult, type TokenSet, type ValidationInput, type ValidationResult } from "../types";
 import { CAPABILITIES } from "../capabilities";
 import { platformRequest, withQuery } from "../http";
 import { resultFromIssues, validateCommon } from "../validation";
 import { findLinks } from "../capabilities";
 
 const GRAPH_HOST = "https://graph.facebook.com";
+
+/**
+ * The OAuth dialog is a web page on www.facebook.com, not a Graph endpoint.
+ *
+ * Asking graph.facebook.com for `/dialog/oauth` returns "Unsupported get
+ * request. Object with ID 'dialog' does not exist" — the Graph API parses
+ * `dialog` as an object id. The dialog also takes no version segment: it is
+ * `www.facebook.com/dialog/oauth`, and passing v26.0 in the path fails the same
+ * way.
+ */
+const OAUTH_DIALOG = "https://www.facebook.com/dialog/oauth";
 
 function graphUrl(version: string, path: string): string {
   return `${GRAPH_HOST}/${version}/${path}`;
@@ -33,14 +44,19 @@ export class FacebookAdapter implements PlatformAdapter {
     return resultFromIssues("FACEBOOK", validateCommon("FACEBOOK", input), input.caption);
   }
 
-  buildAuthorizeUrl(params: { state: string; redirectUri: string; codeChallenge?: string }): string {
-    const appId = env().META_APP_ID;
+  buildAuthorizeUrl(params: {
+    state: string;
+    redirectUri: string;
+    codeChallenge?: string;
+    credentials: AppCredentials;
+  }): string {
+    const appId = params.credentials.appId;
     if (!appId) {
       throw new PlatformError({
         platform: "FACEBOOK",
         errorClass: "permanent",
         code: "NOT_CONFIGURED",
-        message: "META_APP_ID is not configured.",
+        message: "The Meta app id is not configured.",
         userMessage: "Facebook is not configured yet. An admin needs to add the Meta app credentials.",
       });
     }
@@ -54,10 +70,17 @@ export class FacebookAdapter implements PlatformAdapter {
       "pages_manage_engagement",
       "instagram_basic",
       "instagram_content_publish",
+      // The first comment is a POST to /{ig-media-id}/comments, which Meta
+      // refuses without this one even when the post itself published fine.
+      "instagram_manage_comments",
+      // Deleting an Instagram post needs this separate permission, and Meta only
+      // grants it through Facebook Login. Without it the app can publish to
+      // Instagram but never clean up.
+      "instagram_manage_contents",
       "business_management",
     ];
 
-    return withQuery(`${GRAPH_HOST}/${env().META_GRAPH_VERSION}/dialog/oauth`, {
+    return withQuery(OAUTH_DIALOG, {
       client_id: appId,
       redirect_uri: params.redirectUri,
       state: params.state,
@@ -70,16 +93,20 @@ export class FacebookAdapter implements PlatformAdapter {
     code: string;
     redirectUri: string;
     codeVerifier?: string;
+    credentials: AppCredentials;
   }): Promise<{ ok: true; tokens: TokenSet } | { ok: false; error: PlatformError }> {
     try {
       const response = await platformRequest({
         platform: "FACEBOOK",
-        url: withQuery(`${GRAPH_HOST}/${env().META_GRAPH_VERSION}/oauth/access_token`, {
-          client_id: env().META_APP_ID,
-          client_secret: env().META_APP_SECRET,
-          redirect_uri: params.redirectUri,
-          code: params.code,
-        }),
+        url: withQuery(
+          `${GRAPH_HOST}/${params.credentials.version ?? env().META_GRAPH_VERSION}/oauth/access_token`,
+          {
+            client_id: params.credentials.appId,
+            client_secret: params.credentials.appSecret,
+            redirect_uri: params.redirectUri,
+            code: params.code,
+          },
+        ),
         requestId: "oauth-exchange",
       });
 
@@ -114,15 +141,18 @@ export class FacebookAdapter implements PlatformAdapter {
    * while a long-lived user token lasts ~60 days and the Page tokens derived
    * from it do not expire at all.
    */
-  async exchangeForLongLived(tokens: TokenSet): Promise<TokenSet> {
+  async exchangeForLongLived(tokens: TokenSet, credentials: AppCredentials): Promise<TokenSet> {
     const response = await platformRequest({
       platform: "FACEBOOK",
-      url: withQuery(`${GRAPH_HOST}/${env().META_GRAPH_VERSION}/oauth/access_token`, {
-        grant_type: "fb_exchange_token",
-        client_id: env().META_APP_ID,
-        client_secret: env().META_APP_SECRET,
-        fb_exchange_token: tokens.accessToken,
-      }),
+      url: withQuery(
+        `${GRAPH_HOST}/${credentials.version ?? env().META_GRAPH_VERSION}/oauth/access_token`,
+        {
+          grant_type: "fb_exchange_token",
+          client_id: credentials.appId,
+          client_secret: credentials.appSecret,
+          fb_exchange_token: tokens.accessToken,
+        },
+      ),
       requestId: "oauth-long-lived",
     });
 
@@ -142,9 +172,12 @@ export class FacebookAdapter implements PlatformAdapter {
    *
    * Instagram is surfaced here because publishing to it needs the Page's own
    * access token — the user token is not sufficient for `instagram_content_publish`
-   * when the account is Page-linked.
+   * when the account is Page-linked. Both adapters read this one listing and
+   * keep only their own account type; `listAccounts` must never hand back the
+   * other platform's rows, or an Instagram account gets stored as a Facebook
+   * one and every publish to it fails.
    */
-  async listAccounts(
+  async listMetaAccounts(
     tokens: TokenSet,
   ): Promise<{ ok: true; accounts: DiscoveredAccount[] } | { ok: false; error: PlatformError }> {
     try {
@@ -207,6 +240,17 @@ export class FacebookAdapter implements PlatformAdapter {
     } catch (error) {
       return { ok: false, error: asPlatformError(error) };
     }
+  }
+
+  async listAccounts(
+    tokens: TokenSet,
+  ): Promise<{ ok: true; accounts: DiscoveredAccount[] } | { ok: false; error: PlatformError }> {
+    const discovered = await this.listMetaAccounts(tokens);
+    if (!discovered.ok) return discovered;
+    return {
+      ok: true,
+      accounts: discovered.accounts.filter((account) => account.accountType === "PAGE"),
+    };
   }
 
   async verify(
@@ -337,6 +381,59 @@ export class FacebookAdapter implements PlatformAdapter {
         platformPostId: body.id,
         platformPostUrl: `https://www.facebook.com/${body.id}`,
       };
+    } catch (error) {
+      return { ok: false, error: asPlatformError(error) };
+    }
+  }
+
+  /**
+   * Remove a published Page post.
+   *
+   * `DELETE /{post-id}` with the Page token. Graph replies `{"success": true}`,
+   * so a 200 with success:false is a failure and must not be recorded as done.
+   */
+  async deletePublished(request: DeletePublishedRequest): Promise<DeleteResult> {
+    try {
+      const response = await platformRequest({
+        platform: "FACEBOOK",
+        url: withQuery(
+          graphUrl(env().META_GRAPH_VERSION, encodeURIComponent(request.platformPostId)),
+          { access_token: request.accessToken },
+        ),
+        method: "DELETE",
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+
+      const body = response.json as { success?: boolean } | null;
+      if (body && body.success === false) {
+        throw new PlatformError({
+          platform: "FACEBOOK",
+          errorClass: "permanent",
+          code: "DELETE_REFUSED",
+          message: "Meta accepted the delete call but reported success:false.",
+          userMessage: "Facebook refused to delete this post. Delete it from the Page directly.",
+        });
+      }
+
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: asPlatformError(error) };
+    }
+  }
+
+  /** First comment, used for hashtag blocks that should not clutter the caption. */
+  async commentOnPost(request: CommentRequest): Promise<{ ok: boolean; error?: PlatformError }> {
+    try {
+      await platformRequest({
+        platform: "FACEBOOK",
+        url: graphUrl(env().META_GRAPH_VERSION, `${request.platformPostId}/comments`),
+        method: "POST",
+        body: { message: request.body, access_token: request.accessToken },
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+      return { ok: true };
     } catch (error) {
       return { ok: false, error: asPlatformError(error) };
     }

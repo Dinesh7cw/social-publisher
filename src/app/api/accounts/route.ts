@@ -59,7 +59,7 @@ export const GET = route(async (request: Request) => {
       lastVerifiedAt: account.lastVerifiedAt?.toISOString() ?? null,
       createdAt: account.createdAt.toISOString(),
     })),
-    platforms: allPlatformStatuses().map((p) => ({
+    platforms: (await allPlatformStatuses()).map((p) => ({
       platform: p.platform as PlatformId,
       available: p.available,
       message: p.message,

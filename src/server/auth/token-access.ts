@@ -13,6 +13,12 @@ import { ApiError } from "@/server/http";
 
 export interface AccountCredentials {
   accessToken: string;
+  /**
+   * The connecting user's own token, where the platform gave us one. Meta's
+   * Instagram delete endpoint rejects a Page token, so this is the only
+   * credential that can remove an Instagram post.
+   */
+  userAccessToken: string | null;
   refreshToken: string | null;
   tokenType: string | null;
   expiresAt: Date | null;
@@ -54,11 +60,15 @@ export async function getAccountCredentials(accountId: string): Promise<AccountC
 
   let accessToken: string;
   let refreshToken: string | null = null;
+  let userAccessToken: string | null = null;
 
   try {
     accessToken = decryptSecret(account.secret.accessTokenCipher);
     if (account.secret.refreshTokenCipher) {
       refreshToken = decryptSecret(account.secret.refreshTokenCipher);
+    }
+    if (account.secret.userTokenCipher) {
+      userAccessToken = decryptSecret(account.secret.userTokenCipher);
     }
   } catch {
     // A decryption failure means the key rotated without re-encrypting, or the
@@ -71,6 +81,7 @@ export async function getAccountCredentials(accountId: string): Promise<AccountC
 
   return {
     accessToken,
+    userAccessToken,
     refreshToken,
     tokenType: account.secret.tokenType,
     expiresAt: account.tokenExpiresAt,

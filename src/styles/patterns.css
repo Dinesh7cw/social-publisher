@@ -192,6 +192,52 @@
   background: var(--surface);
 }
 
+/* --- Delete post dialog --------------------------------------------------- */
+
+.delete-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  cursor: pointer;
+}
+
+.delete-option input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--primary-color);
+  flex: none;
+}
+
+.delete-option-main {
+  display: grid;
+  gap: 3px;
+  font-size: 14px;
+  line-height: 1.45;
+  min-width: 0;
+}
+
+.delete-failures {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 10px;
+}
+
+.delete-failures li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--negative);
+  background: var(--pill-negative-bg);
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+}
+
 /* --- Section ------------------------------------------------------------ */
 
 .section {

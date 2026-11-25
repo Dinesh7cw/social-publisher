@@ -5,6 +5,7 @@ import Link from "next/link";
 
 import { PLATFORM_SHORT, POST_STATUS_LABEL, postStatusTone, type PlatformId, type PostStatusId } from "@/lib/domain";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DeletePostDialog } from "@/components/ui/delete-post-dialog";
 import "./calendar.css";
 
 interface CalendarPost {
@@ -43,13 +44,25 @@ function toDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-export function CalendarView({ timeZone }: { timeZone: string }) {
+export function CalendarView({
+  timeZone,
+  clientId,
+  composeHref = "/compose",
+  title = "Content calendar",
+}: {
+  timeZone: string;
+  /** When set, the calendar only shows this client's work and hides the client chip. */
+  clientId?: string;
+  composeHref?: string;
+  title?: string;
+}) {
   const [view, setView] = useState<View>("month");
   const [anchor, setAnchor] = useState(() => new Date());
   const [posts, setPosts] = useState<CalendarPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<CalendarPost | null>(null);
+  const [deleting, setDeleting] = useState<CalendarPost | null>(null);
   const [pending, setPending] = useState(false);
   // Bumping this re-runs the fetch effect without changing the visible range.
   const [reloadToken, setReloadToken] = useState(0);
@@ -68,19 +81,27 @@ export function CalendarView({ timeZone }: { timeZone: string }) {
    * The effect performs the fetch and writes state only from the promise
    * callbacks, which is the pattern React's compiler lint asks for: nothing is
    * set synchronously in the effect body.
+   *
+   * Cancellation is a plain flag rather than an AbortController. Aborting a
+   * fetch rejects with an AbortError, and when that rejection lands after the
+   * component has already re-rendered for a new range, the dev overlay reports
+   * it as an uncaught runtime error even though the stale result was correctly
+   * ignored. A flag produces the same behaviour without ever throwing.
    */
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
 
     const params = new URLSearchParams({
       from: range.start.toISOString(),
       to: range.end.toISOString(),
       timeZone,
     });
+    if (clientId) params.set("clientId", clientId);
 
-    fetch(`/api/calendar?${params.toString()}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (controller.signal.aborted) return;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/calendar?${params.toString()}`);
+        if (cancelled) return;
         if (!response.ok) {
           setError("Could not load the calendar.");
           setLoading(false);
@@ -89,20 +110,21 @@ export function CalendarView({ timeZone }: { timeZone: string }) {
         const body = (await response.json()) as {
           days: Array<{ date: string; posts: CalendarPost[] }>;
         };
-        if (controller.signal.aborted) return;
+        if (cancelled) return;
         setPosts(body.days.flatMap((day) => day.posts));
         setError(null);
         setLoading(false);
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        if (error instanceof Error && error.name === "AbortError") return;
+      } catch {
+        if (cancelled) return;
         setError("Could not reach the server.");
         setLoading(false);
-      });
+      }
+    })();
 
-    return () => controller.abort();
-  }, [range.start, range.end, timeZone, reloadToken]);
+    return () => {
+      cancelled = true;
+    };
+  }, [range.start, range.end, timeZone, reloadToken, clientId]);
 
   /**
    * Loading is raised by the interaction that causes a load, not inside the
@@ -178,7 +200,7 @@ export function CalendarView({ timeZone }: { timeZone: string }) {
     <>
       <div className="page-head">
         <div>
-          <h1 className="page-title">Content calendar</h1>
+          <h1 className="page-title">{title}</h1>
           <p className="page-sub">
             {posts.length === 0
               ? "Nothing is scheduled in this period."
@@ -186,7 +208,7 @@ export function CalendarView({ timeZone }: { timeZone: string }) {
           </p>
         </div>
         <div className="page-actions">
-          <Link href="/compose" className="btn btn-primary">
+          <Link href={composeHref} className="btn btn-primary">
             Create post
           </Link>
         </div>
@@ -283,11 +305,13 @@ export function CalendarView({ timeZone }: { timeZone: string }) {
                   <CalendarChip
                     key={post.id}
                     post={post}
+                    showClient={!clientId}
                     onCancel={
                       post.status === "SCHEDULED" || post.status === "FAILED"
                         ? () => setCancelling(post)
                         : undefined
                     }
+                    onDelete={() => setDeleting(post)}
                   />
                 ))}
               </div>
@@ -307,11 +331,40 @@ export function CalendarView({ timeZone }: { timeZone: string }) {
           onConfirm={() => void onCancel(cancelling)}
         />
       ) : null}
+
+      {/* Delete is available on every chip, in every state — including posts
+          that are already live, where it also offers to take the platform copy
+          down. */}
+      {deleting ? (
+        <DeletePostDialog
+          postId={deleting.id}
+          publishedPlatforms={[...new Set(
+            deleting.targets
+              .filter((target) => target.status === "PUBLISHED")
+              .map((target) => PLATFORM_SHORT[target.platform]),
+          )]}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            setReloadToken((token) => token + 1);
+          }}
+        />
+      ) : null}
     </>
   );
 }
 
-function CalendarChip({ post, onCancel }: { post: CalendarPost; onCancel?: () => void }) {
+function CalendarChip({
+  post,
+  onCancel,
+  onDelete,
+  showClient = true,
+}: {
+  post: CalendarPost;
+  onCancel?: () => void;
+  onDelete?: () => void;
+  showClient?: boolean;
+}) {
   const time = post.scheduledAt ?? post.publishedAt;
 
   return (
@@ -326,7 +379,7 @@ function CalendarChip({ post, onCancel }: { post: CalendarPost; onCancel?: () =>
           {POST_STATUS_LABEL[post.status]}
         </span>
       </div>
-      <span className="calendar-chip-client">{post.clientName}</span>
+      {showClient ? <span className="calendar-chip-client">{post.clientName}</span> : null}
       <span className="calendar-chip-caption">{post.baseCaption}</span>
       <span className="calendar-chip-platforms">
         {[...new Set(post.targets.map((t) => PLATFORM_SHORT[t.platform]))].join(" · ")}
@@ -334,6 +387,11 @@ function CalendarChip({ post, onCancel }: { post: CalendarPost; onCancel?: () =>
       {onCancel ? (
         <button type="button" className="calendar-chip-cancel" onClick={onCancel}>
           Cancel
+        </button>
+      ) : null}
+      {onDelete ? (
+        <button type="button" className="calendar-chip-delete" onClick={onDelete}>
+          Delete
         </button>
       ) : null}
     </div>

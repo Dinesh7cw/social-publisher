@@ -1,8 +1,10 @@
-/* Dashboard.
+/* Overview screens.
 
-   The screen's one question: "Is anything waiting on me?" The answer is the
-   sentence under the title, and the six counters are one divided container
-   rather than six cards with icons.
+   Two pages are built from the same parts: the dashboard and a client's
+   overview. Both open with a strip of counters and then a main column with a
+   rail beside it. They live here, in a global stylesheet, rather than in a
+   page-scoped one — a shared pattern whose styles are imported by only one of
+   its two users renders unstyled on the other, which is silent and easy to miss.
 
    Arithmetic: main column 1fr, rail 300px, gap 24. At 1440 the content column
    is 1148, so main = 1148 - 300 - 24 = 824. */
@@ -11,6 +13,13 @@
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   margin-bottom: 24px;
+}
+
+/* The dashboard has six counters, a client's overview five. Sizing to the real
+   count keeps the columns equal, so the numbers line up with the copy below
+   instead of leaving a dead sixth column. */
+.kpi-strip[data-kpis="5"] {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .kpi {
@@ -110,6 +119,8 @@
   text-overflow: ellipsis;
 }
 
+/* The pill, time and delete action stack tightly against the right edge; the
+   row height is set by the caption, not by this column. */
 .activity-meta {
   display: flex;
   flex-direction: column;
@@ -184,7 +195,8 @@
 /* --- Responsive ---------------------------------------------------------- */
 
 @media (max-width: 1180px) {
-  .kpi-strip {
+  .kpi-strip,
+  .kpi-strip[data-kpis="5"] {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
@@ -205,7 +217,8 @@
 }
 
 @media (max-width: 640px) {
-  .kpi-strip {
+  .kpi-strip,
+  .kpi-strip[data-kpis="5"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

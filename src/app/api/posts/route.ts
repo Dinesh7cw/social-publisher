@@ -18,6 +18,16 @@ const createSchema = z.object({
       z.object({
         socialAccountId: z.string().min(1),
         caption: z.string().max(63_206).nullish(),
+        options: z
+          .object({
+            firstComment: z.string().max(2_200).nullish(),
+            altText: z.string().max(1_000).nullish(),
+            userTags: z.array(z.string().min(1).max(60)).max(20).optional(),
+            locationId: z.string().max(64).nullish(),
+            visibility: z.enum(["PUBLIC", "CONNECTIONS", "LOGGED_IN"]).nullish(),
+            replySettings: z.enum(["everyone", "following", "mentioned"]).nullish(),
+          })
+          .nullish(),
       }),
     )
     .min(1, "Choose at least one account.")
@@ -35,6 +45,9 @@ export const GET = route(async (request: Request) => {
 
   const rows = await prisma.post.findMany({
     where: {
+      // Soft-deleted posts are gone from every list but stay in the database for
+      // the audit trail.
+      deletedAt: null,
       ...(clientId ? { clientId } : {}),
       ...(status && status !== "ALL" ? { status: status as never } : {}),
       ...(platform && platform !== "ALL"
@@ -95,6 +108,7 @@ export const POST = route(async (request: Request) => {
     targets: body.targets.map((t) => ({
       socialAccountId: t.socialAccountId,
       caption: t.caption,
+      options: t.options ?? null,
     })),
     authorId: session.user.id,
   });

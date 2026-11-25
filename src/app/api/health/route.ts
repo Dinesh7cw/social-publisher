@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { route } from "@/server/http";
 import { prisma } from "@/server/db";
-import { platformFlags } from "@/lib/env";
+import { resolveAppCredentials } from "@/server/services/platform-credentials";
 import type { PlatformId } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
@@ -25,18 +25,19 @@ export const GET = route(async () => {
 
   const healthy = database === "ok" && redis === "ok";
 
+  const platforms = await Promise.all(
+    (["FACEBOOK", "INSTAGRAM", "LINKEDIN", "X"] as PlatformId[]).map(async (platform) => {
+      const configured = (await resolveAppCredentials(platform)) !== null;
+      return [platform, configured ? "enabled" : "disabled"] as const;
+    }),
+  );
+
   return NextResponse.json(
     {
       status: healthy ? "ok" : "degraded",
       database,
       redis,
-      platforms: (["FACEBOOK", "INSTAGRAM", "LINKEDIN", "X"] as PlatformId[]).reduce(
-        (acc, platform) => {
-          acc[platform] = platformFlags[platform]() ? "enabled" : "disabled";
-          return acc;
-        },
-        {} as Record<PlatformId, string>,
-      ),
+      platforms: Object.fromEntries(platforms) as Record<PlatformId, string>,
     },
     { status: healthy ? 200 : 503 },
   );

@@ -56,7 +56,7 @@ services:
   migrate:
     build: .
     image: cw-social-app:latest
-    command: ["pnpm", "prisma", "migrate", "deploy"]
+    command: ["pnpm", "exec", "prisma", "migrate", "deploy"]
     env_file: .env.production
     depends_on:
       postgres:
@@ -69,7 +69,8 @@ services:
     restart: unless-stopped
     env_file: .env.production
     ports:
-      - "3010:3010"
+      # Bind localhost only; put CloudPanel/nginx in front. Use 3011:3010 if 3010 is taken.
+      - "127.0.0.1:3010:3010"
     depends_on:
       postgres:
         condition: service_healthy

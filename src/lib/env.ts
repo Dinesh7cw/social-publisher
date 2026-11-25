@@ -50,6 +50,9 @@ const serverSchema = z.object({
   S3_FORCE_PATH_STYLE: booleanish.default(true),
   MEDIA_PUBLIC_BASE_URL: z.url(),
 
+  // Legacy on/off flags. Kept parseable so existing .env files still validate,
+  // but availability is now decided by whether app credentials exist — either
+  // saved from the Credentials page or supplied here.
   FACEBOOK_ENABLED: booleanish.default(false),
   INSTAGRAM_ENABLED: booleanish.default(false),
   LINKEDIN_ENABLED: booleanish.default(false),
@@ -176,16 +179,16 @@ export function checkDatabaseForEnvironment(
 }
 
 /**
- * Platform capability flags.
+ * Platform credential presence.
  *
- * A platform is usable only when its flag is on AND its credentials are present.
- * This prevents the classic failure of a "enabled" integration that throws at
- * the first API call because the client secret was never set.
+ * Only reports whether the environment supplies an app id and secret. Availability
+ * itself is answered by `isPlatformAvailable` in the platform registry, which also
+ * consults credentials saved from the Credentials page — this is the env half of
+ * that question, kept for diagnostics.
  */
 export const platformFlags = {
-  FACEBOOK: () => env().FACEBOOK_ENABLED && Boolean(env().META_APP_ID && env().META_APP_SECRET),
-  INSTAGRAM: () => env().INSTAGRAM_ENABLED && Boolean(env().META_APP_ID && env().META_APP_SECRET),
-  LINKEDIN: () =>
-    env().LINKEDIN_ENABLED && Boolean(env().LINKEDIN_CLIENT_ID && env().LINKEDIN_CLIENT_SECRET),
-  X: () => env().X_ENABLED && Boolean(env().X_CLIENT_ID && env().X_CLIENT_SECRET),
+  FACEBOOK: () => Boolean(env().META_APP_ID && env().META_APP_SECRET),
+  INSTAGRAM: () => Boolean(env().META_APP_ID && env().META_APP_SECRET),
+  LINKEDIN: () => Boolean(env().LINKEDIN_CLIENT_ID && env().LINKEDIN_CLIENT_SECRET),
+  X: () => Boolean(env().X_CLIENT_ID && env().X_CLIENT_SECRET),
 } as const;

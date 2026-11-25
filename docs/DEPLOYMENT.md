@@ -3,10 +3,9 @@
 Target: a single VPS running Docker, with Postgres, Redis, the web app, the worker and an nginx
 reverse proxy. This matches the brief's deployment requirement.
 
-> **Honesty note.** The configuration below is written and reviewed but **was not executed against a
-> live VPS**, because this environment has no server to deploy to. The Docker images build locally
-> and the compose file is validated, but "deployed and verified on a VPS" is not a claim this project
-> can make. Section 9 lists exactly what remains unverified.
+> **Status.** The Docker production stack has been deployed behind CloudPanel nginx on
+> `social-publisher.agentwhistle.com` (app on host port `3011` when `3010` is taken). Live social
+> publishing and real object storage are still unverified — see §9.
 
 ---
 
@@ -48,8 +47,11 @@ mkdir -p certs
 #   cp /etc/letsencrypt/live/<domain>/privkey.pem  certs/
 
 # 4. Build and start
+# If CloudPanel (or another reverse proxy) already owns :80/:443, omit `proxy`
+# and only start: postgres redis migrate app worker
+# If host :3010 is taken, map app to another port, e.g. "3011:3010".
 docker compose -f docker-compose.prod.yml --env-file .env.production build
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres redis migrate app worker
 
 # 5. Create the first admin (one time, before anyone can sign in)
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm \
@@ -187,8 +189,9 @@ Stated plainly so nobody assumes otherwise:
 | Docker image builds | ✅ verified locally |
 | `docker compose config` validates | ✅ verified |
 | App runs and serves every screen | ✅ verified locally against real Postgres, Redis and S3 |
-| Deployed to a real VPS and reachable over the internet | ❌ **not done** — no server available |
-| TLS certificates issued by a real CA | ❌ not done |
+| Deployed to a real VPS and reachable over the internet | ✅ CloudPanel + nginx reverse proxy |
+| TLS certificates issued by a real CA | ✅ Let's Encrypt via CloudPanel |
+| Worker path aliases (`@/*`) in production image | ✅ `tsconfig.json` copied into runner |
 | Backup and restore executed | ❌ documented, not run |
 | Publishing to any real social account | ❌ **not done** — no credentials exist |
 | Load or soak testing | ❌ not done |

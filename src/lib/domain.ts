@@ -30,6 +30,7 @@ export const POST_STATUSES = [
   "PARTIAL",
   "FAILED",
   "CANCELLED",
+  "DELETED",
 ] as const;
 export type PostStatusId = (typeof POST_STATUSES)[number];
 
@@ -43,6 +44,7 @@ export const TARGET_STATUSES = [
   "UNKNOWN",
   "SKIPPED",
   "CANCELLED",
+  "DELETED",
 ] as const;
 export type TargetStatusId = (typeof TARGET_STATUSES)[number];
 
@@ -90,6 +92,10 @@ export function derivePostStatus(params: {
   const failed = targetStatuses.filter((s) =>
     TERMINAL_FAILURE_TARGET_STATUSES.includes(s),
   ).length;
+  // A target that was published and then removed still counts as "went out", so
+  // a partially-removed post reads as partial rather than as a failure.
+  const removed = targetStatuses.filter((s) => s === "DELETED").length;
+  const live = published + removed;
 
   // Anything still running wins: the post is not finished.
   if (inFlight > 0) {
@@ -103,7 +109,10 @@ export function derivePostStatus(params: {
   }
 
   if (published === targetStatuses.length) return "PUBLISHED";
+  // Everything that was ever live has been taken down.
+  if (removed === targetStatuses.length) return "DELETED";
   if (published > 0) return "PARTIAL";
+  if (live > 0) return "PARTIAL";
   if (failed === targetStatuses.length) return hasSchedule ? "FAILED" : "FAILED";
 
   // Mixed failure with no publications: still a failure.
@@ -121,6 +130,7 @@ export const TARGET_STATUS_LABEL: Record<TargetStatusId, string> = {
   UNKNOWN: "Needs checking",
   SKIPPED: "Skipped",
   CANCELLED: "Cancelled",
+  DELETED: "Removed from platform",
 };
 
 export const POST_STATUS_LABEL: Record<PostStatusId, string> = {
@@ -131,6 +141,7 @@ export const POST_STATUS_LABEL: Record<PostStatusId, string> = {
   PARTIAL: "Partly published",
   FAILED: "Failed",
   CANCELLED: "Cancelled",
+  DELETED: "Removed",
 };
 
 export type PillTone = "neutral" | "positive" | "negative" | "warning" | "accent" | "info";
@@ -149,6 +160,8 @@ export function targetStatusTone(status: TargetStatusId): PillTone {
       return "accent";
     case "QUEUED":
       return "info";
+    case "DELETED":
+      return "neutral";
     default:
       return "neutral";
   }
@@ -166,6 +179,8 @@ export function postStatusTone(status: PostStatusId): PillTone {
       return "accent";
     case "SCHEDULED":
       return "info";
+    case "DELETED":
+      return "neutral";
     default:
       return "neutral";
   }

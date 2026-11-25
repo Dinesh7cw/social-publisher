@@ -13,12 +13,16 @@
  *  - shut down gracefully without abandoning an in-flight publish.
  */
 
+// Must stay the first import: Next loads .env for the web app, but this process
+// runs under tsx, and `@/server/db` reads the environment as soon as it loads.
+import "dotenv/config";
 import { Worker, type Job } from "bullmq";
 
 import { env } from "@/lib/env";
 import { prisma } from "@/server/db";
 import { logger } from "@/server/logger";
 import { executePublish } from "@/server/services/publish";
+import { refreshMetaUserTokens } from "@/server/services/refresh-meta-tokens";
 import { enqueueTarget, PUBLISH_QUEUE, bullConnection, jobIdFor } from "@/server/queue/publish-queue";
 import type { PublishJobData } from "@/server/queue/publish-queue";
 
@@ -113,7 +117,7 @@ async function reconcile(): Promise<void> {
     where: {
       status: "QUEUED",
       updatedAt: { lt: cutoff },
-      post: { status: { in: ["SCHEDULED", "PUBLISHING"] } },
+      post: { status: { in: ["SCHEDULED", "PUBLISHING"] }, deletedAt: null },
     },
     include: { post: { select: { clientId: true, scheduledAt: true } } },
     take: 50,
@@ -196,6 +200,27 @@ async function main() {
     });
   }, 5 * 60 * 1000);
 
+  // --- Meta user-token renewal ---------------------------------------------
+  //
+  // The token that deletes an Instagram post lasts ~60 days and cannot be renewed
+  // on demand once it lapses. Checked daily, renewed when less than 50 days are
+  // left, which works out to roughly weekly without the team doing anything.
+  await refreshMetaUserTokens().catch((error) => {
+    log.error(
+      { error: error instanceof Error ? error.message : "unknown" },
+      "initial token refresh failed",
+    );
+  });
+
+  const tokenInterval = setInterval(() => {
+    refreshMetaUserTokens().catch((error) => {
+      log.error(
+        { error: error instanceof Error ? error.message : "unknown" },
+        "token refresh failed",
+      );
+    });
+  }, 24 * 60 * 60 * 1000);
+
   // --- Graceful shutdown ---------------------------------------------------
   let shuttingDown = false;
 
@@ -206,6 +231,7 @@ async function main() {
     log.info({ signal }, "worker shutting down; finishing in-flight jobs");
 
     clearInterval(interval);
+    clearInterval(tokenInterval);
 
     // close() waits for active jobs to finish. Jobs that were waiting stay in
     // Redis and are picked up on the next start, which is the whole point of a

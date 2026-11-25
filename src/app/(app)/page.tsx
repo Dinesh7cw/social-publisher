@@ -4,7 +4,6 @@ import Link from "next/link";
 import { requirePageUser } from "@/server/auth/guards";
 import { getDashboardData } from "@/server/services/dashboard";
 import { PLATFORM_SHORT } from "@/lib/domain";
-import "./dashboard.css";
 
 export const metadata: Metadata = { title: "Dashboard" };
 export const dynamic = "force-dynamic";
@@ -168,7 +167,7 @@ export default async function DashboardPage() {
                 <p className="next-step-text">
                   {counts.drafts > 0
                     ? `${counts.drafts} ${counts.drafts === 1 ? "draft is" : "drafts are"} waiting to be finished.`
-                    : "Pick clients and accounts, then write one post for all of them."}
+                    : "Open a client project, then write the content each platform needs."}
                 </p>
                 <Link href={counts.drafts > 0 ? "/calendar" : "/compose"} className="btn btn-secondary btn-sm">
                   {counts.drafts > 0 ? "Open calendar" : "Create a post"}

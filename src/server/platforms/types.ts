@@ -38,8 +38,22 @@ export interface PublishMedia {
   publicUrl: string | null;
 }
 
-export interface PublishRequest {
-  /** Platform post id of nothing yet — this is a fresh publish. */
+export interface PlatformOptions {
+  /** Comment posted straight after publishing. Hashtag blocks live here. */
+  firstComment?: string | null;
+  /** Instagram image alt text. Ignored by platforms that have no equivalent. */
+  altText?: string | null;
+  /** Usernames (without the @) to tag in the media. Instagram only. */
+  userTags?: string[];
+  /** Instagram location id. Requires the id, not a place name. */
+  locationId?: string | null;
+  /** LinkedIn commentary visibility. */
+  visibility?: "PUBLIC" | "CONNECTIONS" | "LOGGED_IN" | null;
+  /** X reply controls. */
+  replySettings?: "everyone" | "following" | "mentioned" | null;
+}
+
+export interface PublishRequest {  /** Platform post id of nothing yet — this is a fresh publish. */
   targetId: string;
   postId: string;
   platform: PlatformId;
@@ -50,6 +64,13 @@ export interface PublishRequest {
   linkUrl: string | null;
 
   media: PublishMedia[];
+
+  /**
+   * Per-platform extras chosen in the composer. One optional bag rather than
+   * twenty optional fields, because no two platforms share the same set, and an
+   * adapter must ignore what it does not understand instead of guessing.
+   */
+  options?: PlatformOptions | null;
 
   /** Decrypted for the duration of this call only. Never persist or log. */
   accessToken: string;
@@ -81,6 +102,41 @@ export interface PublishFailure {
 }
 
 export type PublishResult = PublishSuccess | PublishFailure;
+
+// ---------------------------------------------------------------------------
+// Removing a published post
+// ---------------------------------------------------------------------------
+
+export interface DeletePublishedRequest {
+  /** The id the platform gave us at publish time. */
+  platformPostId: string;
+  /** The platform-side identity the post belongs to. */
+  externalId: string;
+  accountType: string;
+  /** The publishing credential (Page token, member/org token, X token). */
+  accessToken: string;
+  /**
+   * The token of the human who connected the account. Meta's Instagram delete
+   * endpoint accepts only a *user* token, so Instagram cannot be cleaned up with
+   * the Page token that published the post.
+   */
+  userAccessToken?: string | null;
+  requestId: string;
+  signal?: AbortSignal;
+}
+
+export type DeleteResult = { ok: true } | { ok: false; error: PlatformError };
+
+export interface CommentRequest {
+  /** The id the platform gave the post. */
+  platformPostId: string;
+  externalId: string;
+  accountType: string;
+  accessToken: string;
+  body: string;
+  requestId: string;
+  signal?: AbortSignal;
+}
 
 // ---------------------------------------------------------------------------
 // Error normalisation
@@ -185,12 +241,34 @@ export interface PlatformCapabilities {
   /** Whether the platform charges per post containing a link. */
   linkAffectsCost: boolean;
   supportsNativeScheduling: boolean;
+  /**
+   * Whether the adapter can remove a published post through the API. When this
+   * is false the app still deletes its own record, but the copy on the network
+   * has to be removed by hand.
+   */
+  supportsDelete: boolean;
+  /** One line explaining how deletion works here, shown in the delete dialog. */
+  deleteNote: string | null;
   docsUrl: string;
 }
 
 // ---------------------------------------------------------------------------
 // Account discovery and tokens
 // ---------------------------------------------------------------------------
+
+/**
+ * The developer-app credentials an adapter needs to talk to a network.
+ *
+ * Passed in rather than read from the environment inside the adapter: the values
+ * can come from the database, and an adapter that reaches for `env()` would
+ * silently ignore what an admin saved.
+ */
+export interface AppCredentials {
+  appId: string;
+  appSecret: string;
+  /** Pinned API version, when the platform uses one. */
+  version?: string;
+}
 
 export interface DiscoveredAccount {
   externalId: string;
@@ -242,13 +320,28 @@ export interface PlatformAdapter {
   publish(request: PublishRequest): Promise<PublishResult>;
 
   /**
+   * Remove a published post from the platform.
+   *
+   * Optional because a platform can publish without being able to delete. When
+   * an adapter omits this, `supportsDelete` must be false so the UI can say so
+   * instead of offering an action that cannot work.
+   */
+  deletePublished?(request: DeletePublishedRequest): Promise<DeleteResult>;
+
+  /**
+   * Post a first comment under the published post, where the platform supports
+   * it. This is how hashtag blocks stay out of the caption on Instagram.
+   */
+  commentOnPost?(request: CommentRequest): Promise<{ ok: boolean; error?: PlatformError }>;
+
+  /**
    * Exchange a short-lived token for a long-lived one where the platform
    * supports it. Returns the same TokenSet on platforms that do not.
    */
-  exchangeForLongLived?(tokens: TokenSet): Promise<TokenSet>;
+  exchangeForLongLived?(tokens: TokenSet, credentials: AppCredentials): Promise<TokenSet>;
 
   /** Refresh an expired token. Adapters that cannot must say so explicitly. */
-  refresh?(refreshToken: string): Promise<RefreshResult>;
+  refresh?(refreshToken: string, credentials: AppCredentials): Promise<RefreshResult>;
 
   /**
    * Check that a token is still valid, and return the scopes actually granted.
@@ -276,6 +369,8 @@ export interface PlatformAdapter {
     state: string;
     redirectUri: string;
     codeChallenge?: string;
+    /** Resolved by the credentials service; never read from env inside an adapter. */
+    credentials: AppCredentials;
   }): string;
 
   /** Exchange an authorization code for tokens. */
@@ -283,6 +378,7 @@ export interface PlatformAdapter {
     code: string;
     redirectUri: string;
     codeVerifier?: string;
+    credentials: AppCredentials;
   }): Promise<{ ok: true; tokens: TokenSet } | { ok: false; error: PlatformError }>;
 
   /** List the accounts this token can publish as, with the team choosing later. */

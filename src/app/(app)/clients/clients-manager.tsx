@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 
 import type { ClientSummary } from "@/server/services/clients";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -222,34 +223,39 @@ export function ClientsManager({
                       </span>
                     </td>
                     <td>
-                      {canManage ? (
-                        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => setEditing(client)}
-                          >
-                            Edit
-                          </button>
-                          {client.status === "ACTIVE" ? (
+                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                        <Link href={`/clients/${client.id}`} className="btn btn-ghost btn-sm">
+                          Open
+                        </Link>
+                        {canManage ? (
+                          <>
                             <button
                               type="button"
                               className="btn btn-ghost btn-sm"
-                              onClick={() => setArchiving(client)}
+                              onClick={() => setEditing(client)}
                             >
-                              Archive
+                              Edit
                             </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              onClick={() => void onRestore(client)}
-                            >
-                              Restore
-                            </button>
-                          )}
-                        </div>
-                      ) : null}
+                            {client.status === "ACTIVE" ? (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setArchiving(client)}
+                              >
+                                Archive
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => void onRestore(client)}
+                              >
+                                Restore
+                              </button>
+                            )}
+                          </>
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}

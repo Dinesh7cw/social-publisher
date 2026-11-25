@@ -195,6 +195,25 @@
   color: var(--primary-hover);
 }
 
+/* Delete sits next to Cancel but is not red on its own: the dialog is where the
+   irreversible part is confirmed. */
+.calendar-chip-delete {
+  align-self: flex-start;
+  margin-top: 1px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 11px;
+  color: var(--faint);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.calendar-chip-delete:hover {
+  color: var(--negative);
+}
+
 /* --- Responsive ---------------------------------------------------------- */
 
 @media (max-width: 900px) {

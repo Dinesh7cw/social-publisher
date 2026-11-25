@@ -21,10 +21,13 @@
 
 import { createHash, randomBytes } from "node:crypto";
 
-import { env } from "@/lib/env";
 import {
   PlatformError,
   countXCharacters,
+  type AppCredentials,
+  type CommentRequest,
+  type DeletePublishedRequest,
+  type DeleteResult,
   type PlatformAdapter,
   type PublishRequest,
   type PublishResult,
@@ -80,7 +83,12 @@ export class XAdapter implements PlatformAdapter {
     return resultFromIssues("X", issues, input.caption);
   }
 
-  buildAuthorizeUrl(params: { state: string; redirectUri: string; codeChallenge?: string }): string {
+  buildAuthorizeUrl(params: {
+    state: string;
+    redirectUri: string;
+    codeChallenge?: string;
+    credentials: AppCredentials;
+  }): string {
     if (!params.codeChallenge) {
       throw new PlatformError({
         platform: "X",
@@ -93,7 +101,7 @@ export class XAdapter implements PlatformAdapter {
 
     return withQuery(AUTHORIZE_URL, {
       response_type: "code",
-      client_id: env().X_CLIENT_ID,
+      client_id: params.credentials.appId,
       redirect_uri: params.redirectUri,
       scope: SCOPES.join(" "),
       state: params.state,
@@ -106,6 +114,7 @@ export class XAdapter implements PlatformAdapter {
     code: string;
     redirectUri: string;
     codeVerifier?: string;
+    credentials: AppCredentials;
   }): Promise<{ ok: true; tokens: TokenSet } | { ok: false; error: PlatformError }> {
     if (!params.codeVerifier) {
       return {
@@ -129,7 +138,7 @@ export class XAdapter implements PlatformAdapter {
           grant_type: "authorization_code",
           code: params.code,
           redirect_uri: params.redirectUri,
-          client_id: env().X_CLIENT_ID ?? "",
+          client_id: params.credentials.appId,
           code_verifier: params.codeVerifier,
         }),
         requestId: "oauth-exchange-x",
@@ -186,7 +195,7 @@ export class XAdapter implements PlatformAdapter {
     }
   }
 
-  async refresh(refreshToken: string): Promise<RefreshResult> {
+  async refresh(refreshToken: string, credentials: AppCredentials): Promise<RefreshResult> {
     try {
       const response = await platformRequest({
         platform: "X",
@@ -195,7 +204,7 @@ export class XAdapter implements PlatformAdapter {
         body: new URLSearchParams({
           grant_type: "refresh_token",
           refresh_token: refreshToken,
-          client_id: env().X_CLIENT_ID ?? "",
+          client_id: credentials.appId,
         }),
         requestId: "oauth-refresh-x",
       });
@@ -335,6 +344,9 @@ export class XAdapter implements PlatformAdapter {
       if (mediaIds.length > 0) {
         body.media = { media_ids: mediaIds };
       }
+      if (request.options?.replySettings) {
+        body.reply_settings = request.options.replySettings;
+      }
 
       const links = findLinks(request.caption);
       if (links.length > 0) {
@@ -376,6 +388,64 @@ export class XAdapter implements PlatformAdapter {
         platformPostId: tweetId,
         platformPostUrl: `https://x.com/i/web/status/${tweetId}`,
       };
+    } catch (error) {
+      return { ok: false, error: asXError(error) };
+    }
+  }
+
+  /**
+   * Delete a post.
+   *
+   * `DELETE /2/tweets/:id`. OAuth 2.0 user-context tokens with `tweet.write`
+   * cover this; an app-only bearer token cannot delete anything.
+   */
+  async deletePublished(request: DeletePublishedRequest): Promise<DeleteResult> {
+    try {
+      const response = await platformRequest({
+        platform: "X",
+        url: `${TWEETS_URL}/${encodeURIComponent(request.platformPostId)}`,
+        method: "DELETE",
+        accessToken: request.accessToken,
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+
+      const body = response.json as { data?: { deleted?: boolean } } | null;
+      if (body?.data && body.data.deleted === false) {
+        throw new PlatformError({
+          platform: "X",
+          errorClass: "permanent",
+          code: "DELETE_REFUSED",
+          message: "X accepted the delete call but reported deleted:false.",
+          userMessage: "X refused to delete this post. Delete it on x.com instead.",
+        });
+      }
+
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: asXError(error) };
+    }
+  }
+
+  /**
+   * First comment, as a reply to our own post.
+   *
+   * A reply is a new post on X, which is why the composer labels it that way
+   * rather than calling it a comment.
+   */
+  async commentOnPost(request: CommentRequest): Promise<{ ok: boolean; error?: PlatformError }> {
+    try {
+      await platformRequest({
+        platform: "X",
+        url: TWEETS_URL,
+        method: "POST",
+        accessToken: request.accessToken,
+        headers: { "Content-Type": "application/json" },
+        body: { text: request.body, reply: { in_reply_to_tweet_id: request.platformPostId } },
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+      return { ok: true };
     } catch (error) {
       return { ok: false, error: asXError(error) };
     }

@@ -21,6 +21,10 @@
 import { env } from "@/lib/env";
 import {
   PlatformError,
+  type AppCredentials,
+  type CommentRequest,
+  type DeletePublishedRequest,
+  type DeleteResult,
   type PlatformAdapter,
   type PublishRequest,
   type PublishResult,
@@ -30,6 +34,7 @@ import {
   type ValidationResult,
 } from "../types";
 import { CAPABILITIES } from "../capabilities";
+import { facebookAdapter } from "../facebook/adapter";
 import { platformRequest, withQuery } from "../http";
 import { resultFromIssues, validateCommon } from "../validation";
 
@@ -50,69 +55,53 @@ export class InstagramAdapter implements PlatformAdapter {
   }
 
   /**
-   * Instagram uses the same Facebook Login consent as Pages. There is no
-   * separate authorize URL: the account is discovered through the Page it is
-   * linked to, which is why `listAccounts` here returns nothing and the connect
-   * flow uses the Facebook adapter's discovery.
+   * Instagram uses the same Facebook Login consent as Pages, so every OAuth
+   * method here delegates to the Facebook adapter. That is not a shortcut: Meta
+   * grants `instagram_content_publish` and `instagram_manage_contents` only
+   * through Facebook Login, and the Instagram account is discovered from the
+   * Page it is linked to. Sharing the code guarantees the two entry points
+   * request the same permissions — an earlier version of this file listed the
+   * publishing scopes only, so an account connected here could post but never
+   * be deleted.
    */
-  buildAuthorizeUrl(params: { state: string; redirectUri: string; codeChallenge?: string }): string {
-    return facebookStyleAuthorize(params.state, params.redirectUri);
+  buildAuthorizeUrl(params: {
+    state: string;
+    redirectUri: string;
+    codeChallenge?: string;
+    credentials: AppCredentials;
+  }): string {
+    return facebookAdapter.buildAuthorizeUrl(params);
   }
 
   async exchangeCode(params: {
     code: string;
     redirectUri: string;
     codeVerifier?: string;
+    credentials: AppCredentials;
   }): Promise<{ ok: true; tokens: TokenSet } | { ok: false; error: PlatformError }> {
-    try {
-      const response = await platformRequest({
-        platform: "INSTAGRAM",
-        url: withQuery(`${GRAPH_HOST}/${env().META_GRAPH_VERSION}/oauth/access_token`, {
-          client_id: env().META_APP_ID,
-          client_secret: env().META_APP_SECRET,
-          redirect_uri: params.redirectUri,
-          code: params.code,
-        }),
-        requestId: "oauth-exchange-ig",
-      });
+    return facebookAdapter.exchangeCode(params);
+  }
 
-      const body = response.json as { access_token?: string; expires_in?: number };
-      if (!body?.access_token) {
-        return {
-          ok: false,
-          error: new PlatformError({
-            platform: "INSTAGRAM",
-            errorClass: "permanent",
-            code: "NO_TOKEN",
-            message: "Meta did not return an access token.",
-            userMessage: "Instagram did not return an access token. Try connecting again.",
-          }),
-        };
-      }
-
-      return {
-        ok: true,
-        tokens: {
-          accessToken: body.access_token,
-          expiresAt: body.expires_in ? new Date(Date.now() + body.expires_in * 1000) : null,
-          tokenType: "Bearer",
-        },
-      };
-    } catch (error) {
-      return { ok: false, error: asInstagramError(error) };
-    }
+  /** Meta: swap the short-lived user token for a ~60 day one. */
+  async exchangeForLongLived(tokens: TokenSet, credentials: AppCredentials): Promise<TokenSet> {
+    return facebookAdapter.exchangeForLongLived(tokens, credentials);
   }
 
   /**
-   * Instagram accounts are discovered through their linked Page, so this
-   * returns nothing on its own. The connect flow lists Instagram accounts via
-   * the Facebook adapter's page listing, which includes
-   * `instagram_business_account` on each page.
+   * Instagram accounts are discovered through their linked Page, so the Page
+   * listing is reused and then filtered: someone who chose Instagram should see
+   * Instagram accounts, not every Page the login can post to.
    */
   async listAccounts(
-    _tokens: TokenSet,
+    tokens: TokenSet,
   ): Promise<{ ok: true; accounts: DiscoveredAccount[] } | { ok: false; error: PlatformError }> {
-    return { ok: true, accounts: [] };
+    const discovered = await facebookAdapter.listMetaAccounts(tokens);
+    if (!discovered.ok) return discovered;
+
+    return {
+      ok: true,
+      accounts: discovered.accounts.filter((account) => account.accountType === "IG_PROFESSIONAL"),
+    };
   }
 
   async verify(
@@ -271,12 +260,89 @@ export class InstagramAdapter implements PlatformAdapter {
     }
   }
 
+  /**
+   * Delete a published Instagram post.
+   *
+   * Three constraints from the documentation, all of which matter:
+   *  1. The token must be a **Facebook user** token. The Page token used for
+   *     publishing is not accepted, so the account has to hold a user token.
+   *  2. The permission is `instagram_manage_contents`, which is separate from
+   *     the publishing permission and needs its own App Review.
+   *  3. Only Facebook Login supports it. An account connected through Instagram
+   *     Login can never be deleted through the API.
+   *
+   * A carousel is deleted as a whole by passing the album id. Individual
+   * carousel children cannot be removed.
+   */
+  async deletePublished(request: DeletePublishedRequest): Promise<DeleteResult> {
+    if (!request.userAccessToken) {
+      return {
+        ok: false,
+        error: new PlatformError({
+          platform: "INSTAGRAM",
+          errorClass: "permanent",
+          code: "USER_TOKEN_REQUIRED",
+          message: "Instagram deletion requires a Facebook user access token.",
+          userMessage:
+            "This Instagram account was connected without a user token, so Instagram will not accept a delete. Reconnect the account, then try again.",
+        }),
+      };
+    }
+
+    try {
+      const response = await platformRequest({
+        platform: "INSTAGRAM",
+        url: withQuery(
+          `${GRAPH_HOST}/${env().META_GRAPH_VERSION}/${encodeURIComponent(request.platformPostId)}`,
+          { access_token: request.userAccessToken },
+        ),
+        method: "DELETE",
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+
+      const body = response.json as { success?: boolean } | null;
+      if (body && body.success === false) {
+        throw new PlatformError({
+          platform: "INSTAGRAM",
+          errorClass: "permanent",
+          code: "DELETE_REFUSED",
+          message: "Meta accepted the delete call but reported success:false.",
+          userMessage:
+            "Instagram refused to delete this post. Delete it in the Instagram app instead.",
+        });
+      }
+
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: asInstagramError(error) };
+    }
+  }
+
+  /** First comment, which is where a hashtag block belongs on Instagram. */
+  async commentOnPost(request: CommentRequest): Promise<{ ok: boolean; error?: PlatformError }> {
+    try {
+      await platformRequest({
+        platform: "INSTAGRAM",
+        url: `${GRAPH_HOST}/${env().META_GRAPH_VERSION}/${request.platformPostId}/comments`,
+        method: "POST",
+        body: { message: request.body, access_token: request.accessToken },
+        requestId: request.requestId,
+        signal: request.signal,
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: asInstagramError(error) };
+    }
+  }
+
   private async createSingleContainer(request: PublishRequest, version: string): Promise<string> {
     const item = request.media[0]!;
     const isVideo = item.kind === "VIDEO";
 
     const body: Record<string, unknown> = {
       caption: request.caption,
+      ...containerOptions(request, isVideo),
       access_token: request.accessToken,
     };
 
@@ -392,8 +458,7 @@ export class InstagramAdapter implements PlatformAdapter {
    * Instagram processes video asynchronously; publishing a container that is
    * still IN_PROGRESS fails with a confusing error. Image containers are
    * normally FINISHED immediately, so this returns on the first poll.
-   */
-  private async waitForContainerReady(
+   */  private async waitForContainerReady(
     request: PublishRequest,
     containerId: string,
     version: string,
@@ -444,24 +509,35 @@ export class InstagramAdapter implements PlatformAdapter {
   }
 }
 
-function facebookStyleAuthorize(state: string, redirectUri: string): string {
-  const scopes = [
-    "pages_show_list",
-    "pages_read_engagement",
-    "pages_manage_posts",
-    "pages_manage_engagement",
-    "instagram_basic",
-    "instagram_content_publish",
-    "business_management",
-  ];
+/**
+ * Container parameters built from the composer's per-platform options.
+ *
+ * `alt_text` is documented for image containers only (not Reels or stories), so
+ * it is only sent for images. `user_tags` takes a JSON array of usernames;
+ * tagging someone who has not allowed it makes the container call fail, which is
+ * why the composer warns before submitting rather than retrying silently.
+ */
+function containerOptions(request: PublishRequest, isVideo: boolean): Record<string, unknown> {
+  const options = request.options;
+  if (!options) return {};
 
-  return withQuery(`${GRAPH_HOST}/${env().META_GRAPH_VERSION}/dialog/oauth`, {
-    client_id: env().META_APP_ID,
-    redirect_uri: redirectUri,
-    state,
-    response_type: "code",
-    scope: scopes.join(","),
-  });
+  const out: Record<string, unknown> = {};
+
+  const altText = options.altText?.trim();
+  if (altText && !isVideo) out.alt_text = altText.slice(0, 1000);
+
+  const tags = (options.userTags ?? [])
+    .map((tag) => tag.replace(/^@/, "").trim())
+    .filter(Boolean)
+    .slice(0, 20);
+  if (tags.length > 0 && !isVideo) {
+    out.user_tags = JSON.stringify(tags.map((username) => ({ username })));
+  }
+
+  const locationId = options.locationId?.trim();
+  if (locationId) out.location_id = locationId;
+
+  return out;
 }
 
 function asInstagramError(error: unknown): PlatformError {

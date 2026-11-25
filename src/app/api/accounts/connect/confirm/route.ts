@@ -14,6 +14,13 @@ const confirmSchema = z.object({
   externalIds: z.array(z.string().min(1)).min(1, "Choose at least one account."),
 });
 
+const ACCOUNT_TYPES_FOR: Record<string, readonly string[]> = {
+  FACEBOOK: ["PAGE"],
+  INSTAGRAM: ["IG_PROFESSIONAL"],
+  LINKEDIN: ["MEMBER", "ORGANIZATION"],
+  X: ["X_ACCOUNT"],
+};
+
 interface PendingAccount {
   externalId: string;
   displayName: string;
@@ -27,6 +34,14 @@ interface PendingAccount {
 interface PendingPayload {
   accounts: PendingAccount[];
   refreshToken: string | null;
+  /** The connecting user's token, kept for Instagram deletion. */
+  userToken?: string | null;
+  /**
+   * When that user token dies (~60 days). Stored so the weekly extender can renew
+   * it before it lapses — without this, Instagram deletion silently stops working
+   * two months after connecting, while publishing keeps going.
+   */
+  userTokenExpiresAt?: string | null;
   defaultScopes: string[];
 }
 
@@ -70,6 +85,17 @@ export const POST = route(async (request: Request) => {
   );
 
   if (chosen.length === 0) throw invalid("None of those accounts were available.");
+
+  // The adapter is supposed to return only its own platform's account types,
+  // but a mismatch here is unrecoverable later: an Instagram account stored as
+  // FACEBOOK publishes through the Pages API and fails on every post.
+  const allowedTypes = ACCOUNT_TYPES_FOR[connectSession.platform] ?? [];
+  const mismatched = chosen.find((account) => !allowedTypes.includes(account.accountType));
+  if (mismatched) {
+    throw invalid(
+      `${mismatched.displayName} is not a ${connectSession.platform.toLowerCase()} account. Connect it from its own platform.`,
+    );
+  }
 
   const created = await prisma.$transaction(async (tx) => {
     const rows = [];
@@ -131,12 +157,20 @@ export const POST = route(async (request: Request) => {
           refreshTokenCipher: payload.refreshToken
             ? encryptSecret(payload.refreshToken)
             : null,
+          userTokenCipher: payload.userToken ? encryptSecret(payload.userToken) : null,
+          userTokenExpiresAt: payload.userTokenExpiresAt
+            ? new Date(payload.userTokenExpiresAt)
+            : null,
           tokenType: "Bearer",
           keyId: "k1",
         },
         update: {
           accessTokenCipher: encryptSecret(account.accessToken),
           refreshTokenCipher: payload.refreshToken ? encryptSecret(payload.refreshToken) : null,
+          userTokenCipher: payload.userToken ? encryptSecret(payload.userToken) : null,
+          userTokenExpiresAt: payload.userTokenExpiresAt
+            ? new Date(payload.userTokenExpiresAt)
+            : null,
           rotatedAt: new Date(),
         },
       });

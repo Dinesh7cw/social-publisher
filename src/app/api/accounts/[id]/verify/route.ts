@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { route, notFound, ApiError } from "@/server/http";
 import { requireUser, assertSameOrigin } from "@/server/auth/guards";
 import { prisma } from "@/server/db";
-import { getAdapter, isPlatformAvailable } from "@/server/platforms/registry";
+import { getAdapter } from "@/server/platforms/registry";
+import { resolveAppCredentials } from "@/server/services/platform-credentials";
 import { getAccountCredentials } from "@/server/auth/token-access";
 import { recordAuditSafe } from "@/server/audit";
 
@@ -28,14 +29,14 @@ export const POST = route(async (request: Request, { params }: Params) => {
 
   if (!account) throw notFound("Account not found.");
 
-  if (!isPlatformAvailable(account.platform as never)) {
+  if ((await resolveAppCredentials(account.platform as never)) === null) {
     throw new ApiError(
       "PLATFORM_DISABLED",
       `${account.platform} is not configured on this deployment, so its connection cannot be checked.`,
     );
   }
 
-  const adapter = getAdapter(account.platform as never);
+  const adapter = await getAdapter(account.platform as never);
   const credentials = await getAccountCredentials(id);
 
   if (!adapter.verify) {

@@ -1,0 +1,681 @@
+/* Composer: content column plus a 300px rail.
+
+   Arithmetic at 1440: content 1148 = main 824 + 24 gap + 300 rail. */
+
+.composer-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--gap);
+  align-items: start;
+}
+
+.composer-main {
+  min-width: 0;
+  display: grid;
+  gap: var(--gap);
+}
+
+.composer-rail {
+  min-width: 0;
+  position: sticky;
+  top: 28px;
+}
+
+.composer-textarea {
+  min-height: 132px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.composer-note {
+  background: var(--pill-warning-bg);
+  color: var(--pill-warning-ink);
+}
+
+.composer-textarea-sm {
+  min-height: 74px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* --- Platform extras ------------------------------------------------------
+   A tinted block so it reads as settings attached to the caption rather than
+   as more caption space. */
+
+.extras {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+}
+
+.extras-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.extras-title {
+  margin: 0;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.extras .field {
+  margin: 0;
+}
+
+/* --- Account picker ------------------------------------------------------ */
+
+.account-list {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+
+/* --- Platform tabs ------------------------------------------------------- */
+
+.platform-panel {
+  overflow: hidden;
+}
+
+.platform-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid var(--rule);
+  padding: 0 12px;
+  gap: 4px;
+}
+
+.platform-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 12px 10px 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.platform-tab:hover {
+  border-bottom-color: var(--control);
+}
+
+.platform-tab[data-active="true"] {
+  border-bottom-color: var(--primary-color);
+}
+
+.platform-tab-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.platform-tab[data-active="true"] .platform-tab-name {
+  color: var(--text);
+}
+
+.platform-tab[data-empty="true"] .platform-tab-name {
+  color: var(--faint);
+}
+
+.platform-tab-meta {
+  font-size: var(--fs-meta);
+  color: var(--faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.platform-panel-body {
+  display: grid;
+  gap: 16px;
+}
+
+.caption-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.caption-head .field-label {
+  margin-bottom: 0;
+}
+
+.platform-problems {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+  color: var(--pill-negative-ink);
+}
+
+/* --- Rail: what the post is going to ------------------------------------- */
+
+.target-summary {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.target-summary-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.target-summary-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+
+.target-summary-button:hover .target-summary-name {
+  color: var(--accent-ink);
+}
+
+.target-summary-name {
+  font-size: 14px;
+  color: var(--text);
+  transition: color var(--dur-fast) var(--ease);
+}
+
+/* --- Media --------------------------------------------------------------- */
+
+.media-block {
+  display: grid;
+  gap: 14px;
+}
+
+.media-drop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px;
+  border: 1px dashed var(--control);
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    background var(--dur-fast) var(--ease);
+}
+
+.media-drop[data-dragging="true"] {
+  border-color: var(--primary-color);
+  background: var(--accent-soft);
+}
+
+.media-drop[data-busy="true"] {
+  border-style: solid;
+  border-color: var(--accent-track);
+}
+
+.media-drop-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.media-drop-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.media-progress,
+.media-errors {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: var(--fs-small);
+}
+
+.media-errors {
+  color: var(--pill-negative-ink);
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.media-tile {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+}
+
+.media-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-chip);
+  background: var(--active);
+  display: block;
+}
+
+.media-thumb-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.media-tile-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-remove {
+  justify-self: start;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* --- Preview --------------------------------------------------------------
+   A light frame on the app's own surface. The goal is layout fidelity, not
+   brand mimicry: colours and type stay the app's so nobody mistakes a mock for
+   the real network. */
+
+.preview-block {
+  display: grid;
+  gap: 12px;
+}
+
+.pv-frame {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--raised);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  max-width: 440px;
+}
+
+.pv-frame-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.pv-frame-platform {
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.pv-frame-hint {
+  font-size: var(--fs-meta);
+  color: var(--faint);
+}
+
+.pv-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.pv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.pv-head-text {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  flex: 1;
+}
+
+.pv-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pv-name-inline {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pv-sub {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.pv-more {
+  color: var(--faint);
+  letter-spacing: 1px;
+  font-size: 12px;
+}
+
+.pv-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 50%;
+  background: var(--active);
+  color: var(--muted);
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+}
+
+/* Instagram is square; Facebook keeps the image's own ratio. */
+.pv-media {
+  position: relative;
+  background: var(--active);
+}
+
+.pv-media[data-shape="square"] {
+  aspect-ratio: 1 / 1;
+}
+
+.pv-media[data-shape="natural"] {
+  aspect-ratio: 4 / 3;
+}
+
+.pv-media[data-shape="wide"] {
+  aspect-ratio: 16 / 10;
+}
+
+.pv-media-item {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.pv-media-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-small);
+  color: var(--muted);
+}
+
+.pv-media-count {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.62);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pv-required {
+  padding: 22px 14px;
+  text-align: center;
+  font-size: var(--fs-small);
+  color: var(--pill-warning-ink);
+  background: var(--pill-warning-bg);
+}
+
+.pv-body {
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+/* Facebook and LinkedIn put the copy above the image. */
+.pv-body-first {
+  padding: 0 12px 10px;
+}
+
+.pv-caption {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.pv-caption-linkedin,
+.pv-caption-x {
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.pv-comment {
+  padding-top: 6px;
+  border-top: 1px solid var(--rule);
+}
+
+.pv-comment-block {
+  border-top: 1px solid var(--rule);
+  padding-top: 10px;
+}
+
+.pv-placeholder {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--faint);
+  font-style: italic;
+}
+
+.pv-link {
+  color: var(--secondary-dark-color);
+}
+
+.pv-actions,
+.pv-reactions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px 8px;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.pv-reactions {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--rule);
+  font-size: var(--fs-meta);
+  justify-content: space-between;
+}
+
+.pv-actions-end {
+  margin-left: auto;
+}
+
+.pv-reactions-x span {
+  flex: 1;
+  text-align: center;
+}
+
+.pv-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.pv-annotations {
+  display: grid;
+  gap: 6px;
+  max-width: 440px;
+}
+
+.pv-note {
+  margin: 0;
+  font-size: var(--fs-meta);
+  line-height: 1.5;
+  color: var(--muted);
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.pv-note-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* --- Mode switch and actions --------------------------------------------- */
+
+/* Write / Preview. Segmented rather than a right-hand pane: the platform panel
+   is already the widest column, and a side-by-side mock would squeeze both. */
+.panel-switch {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--active);
+  width: fit-content;
+}
+
+.panel-switch-option {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: calc(var(--radius-control) - 2px);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.panel-switch-option:hover {
+  color: var(--text);
+}
+
+.panel-switch-option[data-active="true"] {
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+}
+
+.panel-switch-option:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 1px;
+}
+
+.mode-switch {
+  display: grid;
+  gap: 2px;
+}
+
+.mode-option {
+  text-align: left;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
+}
+
+.mode-option:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.mode-option[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--pill-accent-ink);
+  font-weight: 500;
+}
+
+.composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+
+/* A closing note, not a warning banner: it is a fact of every network, not a
+   problem with this post. */
+.composer-final-note {
+  margin: 8px 0 0;
+  text-align: right;
+  line-height: 1.5;
+}
+
+@media (max-width: 1024px) {
+  .composer-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .composer-rail {
+    position: static;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Two rows of two rather than four unreadable columns. */
+  .platform-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .composer-actions {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+}

@@ -4,7 +4,8 @@ import { env } from "@/lib/env";
 import { route, ApiError, invalid } from "@/server/http";
 import { getSession } from "@/server/auth/session";
 import { consumeOAuthState } from "@/server/auth/oauth-state";
-import { findAdapter, isPlatformAvailable } from "@/server/platforms/registry";
+import { findAdapter } from "@/server/platforms/registry";
+import { resolveAppCredentials } from "@/server/services/platform-credentials";
 import { encryptSecret } from "@/lib/crypto";
 import { prisma } from "@/server/db";
 import { PLATFORMS, type PlatformId } from "@/lib/domain";
@@ -33,7 +34,11 @@ export const GET = route(async (request: Request, { params }: Params) => {
   const platform = rawPlatform.toUpperCase() as PlatformId;
 
   if (!PLATFORMS.includes(platform)) throw invalid("Unknown platform.");
-  if (!isPlatformAvailable(platform)) {
+
+  // Resolved here rather than in the adapter, so a credential saved from the
+  // Credentials page is the one used to complete this exchange.
+  const credentials = await resolveAppCredentials(platform);
+  if (!credentials) {
     throw new ApiError("PLATFORM_DISABLED", `${platform} is not configured on this deployment.`);
   }
 
@@ -71,17 +76,26 @@ export const GET = route(async (request: Request, { params }: Params) => {
   const adapter = findAdapter(platform);
   if (!adapter) throw new ApiError("PLATFORM_DISABLED", `${platform} is not available.`);
 
+  // Return to where the flow started (a client's Accounts tab, say) and fall
+  // back to the agency-wide list. The session id is appended either way.
+  const returnBase = validation.redirectTo ? `${env().APP_URL}${validation.redirectTo}` : `${env().APP_URL}/accounts`;
+
   const redirectUri = `${env().APP_URL}/api/accounts/connect/${platform.toLowerCase()}/callback`;
 
   const exchanged = await adapter.exchangeCode({
     code,
     redirectUri,
     codeVerifier: validation.codeVerifier ?? undefined,
+    credentials: {
+      appId: credentials.appId,
+      appSecret: credentials.appSecret,
+      version: credentials.config.version,
+    },
   });
 
   if (!exchanged.ok) {
     return NextResponse.redirect(
-      `${env().APP_URL}/accounts?connect_error=${encodeURIComponent(exchanged.error.userMessage)}`,
+      `${returnBase}?connect_error=${encodeURIComponent(exchanged.error.userMessage)}`,
     );
   }
 
@@ -89,20 +103,26 @@ export const GET = route(async (request: Request, { params }: Params) => {
   // do not expire and scheduled posts keep working.
   let tokens = exchanged.tokens;
   if (adapter.exchangeForLongLived) {
-    tokens = await adapter.exchangeForLongLived(tokens).catch(() => tokens);
+    tokens = await adapter
+      .exchangeForLongLived(tokens, {
+        appId: credentials.appId,
+        appSecret: credentials.appSecret,
+        version: credentials.config.version,
+      })
+      .catch(() => tokens);
   }
 
   const discovered = await adapter.listAccounts(tokens);
 
   if (!discovered.ok) {
     return NextResponse.redirect(
-      `${env().APP_URL}/accounts?connect_error=${encodeURIComponent(discovered.error.userMessage)}`,
+      `${returnBase}?connect_error=${encodeURIComponent(discovered.error.userMessage)}`,
     );
   }
 
   if (discovered.accounts.length === 0) {
     return NextResponse.redirect(
-      `${env().APP_URL}/accounts?connect_error=${encodeURIComponent(
+      `${returnBase}?connect_error=${encodeURIComponent(
         "No accounts could be published to with that login. Check that the account has the right role on the page.",
       )}`,
     );
@@ -127,6 +147,11 @@ export const GET = route(async (request: Request, { params }: Params) => {
             handle: account.handle ?? null,
           })),
           refreshToken: tokens.refreshToken ?? null,
+          // The user token is kept separately from the Page token because
+          // Instagram deletion requires it and a Page token will not do. Its
+          // expiry is stored alongside so it can be renewed before it lapses.
+          userToken: tokens.accessToken,
+          userTokenExpiresAt: tokens.expiresAt?.toISOString() ?? null,
           defaultScopes: tokens.scopes ?? [],
         }),
       ),
@@ -135,6 +160,6 @@ export const GET = route(async (request: Request, { params }: Params) => {
   });
 
   return NextResponse.redirect(
-    `${env().APP_URL}/accounts?connect_session=${connectSession.id}&platform=${platform}`,
+    `${returnBase}?connect_session=${connectSession.id}&platform=${platform}`,
   );
 });

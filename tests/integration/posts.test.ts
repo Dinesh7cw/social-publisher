@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { testDb, makeTwoClientsWithAccounts } from "../setup/db";
-import { createPost, validatePost, cancelPost } from "@/server/services/posts";
+import { createPost, validatePost, cancelPost, updatePost } from "@/server/services/posts";
 import { recalculatePostStatusForPost } from "@/server/services/posts";
+import { resetEnvCache } from "@/lib/env";
 
 describe("post creation and cross-client isolation", () => {
   it("creates a draft with a target per account", async () => {
@@ -95,6 +96,33 @@ describe("post creation and cross-client isolation", () => {
 });
 
 describe("validation before publishing", () => {
+  /**
+   * Validation refuses to report per-target content problems for a platform that
+   * has no credentials on this deployment, because such a post could never
+   * publish anyway. These cases are about content rules, so the platforms are
+   * switched on for the duration of the block.
+   */
+  beforeEach(() => {
+    process.env.FACEBOOK_ENABLED = "true";
+    process.env.X_ENABLED = "true";
+    // Availability is the flag AND the credentials, so both are needed.
+    process.env.META_APP_ID = "test-meta-app-id";
+    process.env.META_APP_SECRET = "test-meta-app-secret";
+    process.env.X_CLIENT_ID = "test-x-client-id";
+    process.env.X_CLIENT_SECRET = "test-x-client-secret";
+    resetEnvCache();
+  });
+
+  afterEach(() => {
+    process.env.FACEBOOK_ENABLED = "false";
+    process.env.X_ENABLED = "false";
+    process.env.META_APP_ID = "";
+    process.env.META_APP_SECRET = "";
+    process.env.X_CLIENT_ID = "";
+    process.env.X_CLIENT_SECRET = "";
+    resetEnvCache();
+  });
+
   it("reports a disconnected account as invalid", async () => {
     const { user, clientA, accountA } = await makeTwoClientsWithAccounts();
     const db = testDb();
@@ -291,6 +319,127 @@ describe("cancellation", () => {
 
     expect(post?.status).toBe("CANCELLED");
     expect(targets[0]?.status).toBe("CANCELLED");
+  });
+});
+
+describe("editing a saved draft", () => {
+  async function secondAccount(clientId: string, connectedById: string) {
+    return testDb().socialAccount.create({
+      data: {
+        clientId,
+        platform: "INSTAGRAM",
+        externalId: "ig-a",
+        displayName: "@cw",
+        accountType: "IG_PROFESSIONAL",
+        status: "CONNECTED",
+        scopes: [],
+        connectedById,
+      },
+    });
+  }
+
+  it("updates captions and options, and adds and removes accounts", async () => {
+    const { user, clientA, accountA } = await makeTwoClientsWithAccounts();
+    const instagram = await secondAccount(clientA.id, user.id);
+    const db = testDb();
+
+    const { id } = await createPost({
+      clientId: clientA.id,
+      baseCaption: "First draft",
+      mediaAssetIds: [],
+      targets: [{ socialAccountId: accountA.id }],
+      authorId: user.id,
+    });
+
+    await updatePost({
+      postId: id,
+      actorId: user.id,
+      baseCaption: "Second draft",
+      mediaAssetIds: [],
+      targets: [
+        { socialAccountId: instagram.id, caption: "For Instagram", options: { firstComment: "#cw" } },
+      ],
+    });
+
+    const post = await db.post.findUniqueOrThrow({ where: { id }, include: { targets: true } });
+    expect(post.baseCaption).toBe("Second draft");
+    expect(post.status).toBe("DRAFT");
+    expect(post.targets).toHaveLength(1);
+    expect(post.targets[0]?.socialAccountId).toBe(instagram.id);
+    expect(post.targets[0]?.caption).toBe("For Instagram");
+    expect(post.targets[0]?.platformOptions).toEqual({ firstComment: "#cw" });
+  });
+
+  it("refuses an account from another client", async () => {
+    const { user, clientA, accountA, accountB } = await makeTwoClientsWithAccounts();
+
+    const { id } = await createPost({
+      clientId: clientA.id,
+      baseCaption: "Draft",
+      mediaAssetIds: [],
+      targets: [{ socialAccountId: accountA.id }],
+      authorId: user.id,
+    });
+
+    await expect(
+      updatePost({
+        postId: id,
+        actorId: user.id,
+        targets: [{ socialAccountId: accountB.id }],
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("will not change the accounts of a scheduled post", async () => {
+    const { user, clientA, accountA } = await makeTwoClientsWithAccounts();
+    const instagram = await secondAccount(clientA.id, user.id);
+    const db = testDb();
+
+    const { id } = await createPost({
+      clientId: clientA.id,
+      baseCaption: "Scheduled",
+      mediaAssetIds: [],
+      targets: [{ socialAccountId: accountA.id }],
+      authorId: user.id,
+    });
+    await db.post.update({ where: { id }, data: { status: "SCHEDULED" } });
+
+    // A scheduled target already has a queued job; swapping the account would
+    // orphan it.
+    await expect(
+      updatePost({
+        postId: id,
+        actorId: user.id,
+        targets: [{ socialAccountId: instagram.id }],
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_FAILED" });
+
+    // Caption edits on the same accounts are still allowed.
+    await updatePost({
+      postId: id,
+      actorId: user.id,
+      targets: [{ socialAccountId: accountA.id, caption: "Reworded" }],
+    });
+    const target = await db.postTarget.findFirstOrThrow({ where: { postId: id } });
+    expect(target.caption).toBe("Reworded");
+  });
+
+  it("refuses to edit a published post", async () => {
+    const { user, clientA, accountA } = await makeTwoClientsWithAccounts();
+    const db = testDb();
+
+    const { id } = await createPost({
+      clientId: clientA.id,
+      baseCaption: "Live",
+      mediaAssetIds: [],
+      targets: [{ socialAccountId: accountA.id }],
+      authorId: user.id,
+    });
+    await db.post.update({ where: { id }, data: { status: "PUBLISHED" } });
+
+    await expect(
+      updatePost({ postId: id, actorId: user.id, baseCaption: "Changed" }),
+    ).rejects.toMatchObject({ code: "TARGET_NOT_PUBLISHABLE" });
   });
 });
 

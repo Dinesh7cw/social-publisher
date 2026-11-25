@@ -24,7 +24,9 @@ export const GET = route(async (request: Request) => {
 
   const rows = await prisma.postTarget.findMany({
     where: {
-      ...(clientId ? { post: { clientId } } : {}),
+      // Soft-deleted posts are hidden from history too: the row still exists for
+      // audit, but it is not part of the team's working view.
+      post: { deletedAt: null, ...(clientId ? { clientId } : {}) },
       ...(platform && platform !== "ALL" ? { socialAccount: { platform: platform as never } } : {}),
       ...(status && status !== "ALL" ? { status: status as never } : {}),
     },

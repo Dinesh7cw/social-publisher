@@ -1,0 +1,33 @@
+/* Connect-account panel and its picker.
+   The checkbox row itself is shared and lives in globals.css. */
+
+.connect-panel {
+  margin-bottom: 24px;
+}
+
+.connect-lede {
+  max-width: 62ch;
+  margin-bottom: 14px;
+}
+
+.connect-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* The picker can return a Page plus several Instagram accounts, so the list
+   scrolls rather than growing the dialog past the viewport. */
+.connect-picker-lede {
+  margin-bottom: 10px;
+}
+
+.connect-picker-list {
+  display: grid;
+  gap: 2px;
+  max-height: 46vh;
+  overflow-y: auto;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
+  padding: 4px;
+}

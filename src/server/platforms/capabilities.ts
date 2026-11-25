@@ -36,6 +36,8 @@ export const CAPABILITIES: Record<string, PlatformCapabilities> = {
     requiresPublicMediaUrl: true,
     linkAffectsCost: false,
     supportsNativeScheduling: true,
+    supportsDelete: true,
+    deleteNote: "Deletes the post from the Page with the Page token.",
     docsUrl: "https://developers.facebook.com/docs/pages-api/posts",
   },
 
@@ -60,6 +62,12 @@ export const CAPABILITIES: Record<string, PlatformCapabilities> = {
     requiresPublicMediaUrl: true,
     linkAffectsCost: false,
     supportsNativeScheduling: false,
+    supportsDelete: true,
+    // Meta restricts this endpoint to Facebook Login and requires a *user*
+    // token with instagram_manage_contents, so it is not the same credential
+    // that published the post.
+    deleteNote:
+      "Delete needs a Facebook user token with instagram_manage_contents. Reconnect the account if this fails.",
     docsUrl: "https://developers.facebook.com/docs/instagram-platform/content-publishing",
   },
 
@@ -83,6 +91,8 @@ export const CAPABILITIES: Record<string, PlatformCapabilities> = {
     requiresPublicMediaUrl: false,
     linkAffectsCost: false,
     supportsNativeScheduling: false,
+    supportsDelete: true,
+    deleteNote: "Deletes the post through the Posts API with the connected token.",
     docsUrl: "https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api",
   },
 
@@ -107,6 +117,8 @@ export const CAPABILITIES: Record<string, PlatformCapabilities> = {
     requiresPublicMediaUrl: false,
     linkAffectsCost: true,
     supportsNativeScheduling: false,
+    supportsDelete: true,
+    deleteNote: "Deletes the post with DELETE /2/tweets.",
     docsUrl: "https://docs.x.com/x-api/posts/create-post",
   },
 };

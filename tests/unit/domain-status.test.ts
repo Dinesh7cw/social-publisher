@@ -51,6 +51,16 @@ describe("derivePostStatus", () => {
     expect(T(["UNKNOWN"])).toBe("FAILED");
   });
 
+  it("reports DELETED once every copy has been removed from its platform", () => {
+    expect(T(["DELETED", "DELETED"])).toBe("DELETED");
+    expect(T(["DELETED"])).toBe("DELETED");
+  });
+
+  it("reports PARTIAL when one copy was removed and another is still live", () => {
+    expect(T(["PUBLISHED", "DELETED"])).toBe("PARTIAL");
+    expect(T(["DELETED", "FAILED_PERMANENT"])).toBe("PARTIAL");
+  });
+
   it("reports CANCELLED when the post was cancelled outright", () => {
     expect(T(["CANCELLED", "CANCELLED"], { cancelled: true })).toBe("CANCELLED");
     expect(T(["PUBLISHED", "CANCELLED"], { cancelled: true })).toBe("CANCELLED");
@@ -81,6 +91,9 @@ describe("retry eligibility", () => {
     expect(isRetryable("CANCELLED")).toBe(false);
     expect(isRetryable("PENDING")).toBe(false);
     expect(isRetryable("SKIPPED")).toBe(false);
+    // A removed copy must not be retryable: that would resurrect a post the team
+    // deliberately took down.
+    expect(isRetryable("DELETED")).toBe(false);
   });
 });
 
@@ -96,5 +109,6 @@ describe("editability", () => {
     expect(isEditablePostStatus("PUBLISHED")).toBe(false);
     expect(isEditablePostStatus("PUBLISHING")).toBe(false);
     expect(isEditablePostStatus("CANCELLED")).toBe(false);
+    expect(isEditablePostStatus("DELETED")).toBe(false);
   });
 });
